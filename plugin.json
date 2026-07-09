@@ -1,0 +1,45 @@
+{
+    "name": "phlix-plugin-anilist",
+    "version": "0.1.0",
+    "phlix_min_server_version": "0.14.0",
+    "type": "metadata-provider",
+    "entry": "Phlix\\Plugins\\Metadata\\AniList\\AniListPlugin",
+    "events": [
+        "phlix.library.scan.completed",
+        "phlix.playback.stopped"
+    ],
+    "settings": {
+        "enabled": {
+            "type": "boolean",
+            "default": false,
+            "description": "Enable AniList metadata provider"
+        },
+        "access_token": {
+            "type": "string",
+            "default": null,
+            "secret": true,
+            "managed": true,
+            "description": "AniList API access token (encrypted at rest, managed automatically)"
+        },
+        "username": {
+            "type": "string",
+            "default": "",
+            "description": "AniList username for watchlist sync"
+        },
+        "sync_enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Enable watchlist status sync with AniList"
+        },
+        "sync_interval_minutes": {
+            "type": "integer",
+            "default": 60,
+            "description": "How often to sync watchlist status (minutes)"
+        },
+        "auto_match": {
+            "type": "boolean",
+            "default": true,
+            "description": "Automatically match local media to AniList entries using external IDs"
+        }
+    }
+}

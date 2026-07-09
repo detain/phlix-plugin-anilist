@@ -1,0 +1,36 @@
+{
+    "name": "detain/phlix-plugin-anilist",
+    "type": "phlix-plugin",
+    "description": "AniList metadata provider for Phlix — anime/manga metadata, watchlist sync, and GraphQL integration.",
+    "license": "MIT",
+    "keywords": ["phlix", "phlix-plugin", "anilist", "anime", "manga", "metadata", "graphql", "watchlist"],
+    "homepage": "https://github.com/detain/phlix-plugin-anilist",
+    "require": {
+        "php": ">=8.3",
+        "detain/phlix-shared": "^0.12.0",
+        "psr/container": "^1.1 || ^2.0",
+        "psr/log": "^1.0 || ^2.0 || ^3.0"
+    },
+    "require-dev": {
+        "phpstan/phpstan": "^2.2",
+        "phpunit/phpunit": "^10.0",
+        "squizlabs/php_codesniffer": "^4.0"
+    },
+    "repositories": [
+        { "type": "vcs", "url": "https://github.com/detain/phlix-shared.git" }
+    ],
+    "autoload": {
+        "psr-4": {
+            "Phlix\\Plugins\\Metadata\\AniList\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Phlix\\Tests\\Unit\\Plugins\\Metadata\\AniList\\": "tests/Unit/"
+        }
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true
+    }
+}
