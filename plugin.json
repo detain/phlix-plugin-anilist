@@ -18,7 +18,6 @@
             "type": "string",
             "default": null,
             "secret": true,
-            "managed": true,
             "description": "AniList API access token (encrypted at rest, managed automatically)"
         },
         "username": {
