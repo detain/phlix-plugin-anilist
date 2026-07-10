@@ -1,0 +1,169 @@
+parameters:
+	ignoreErrors:
+		-
+			message: '#^Cannot access offset ''media'' on mixed\.$#'
+			identifier: offsetAccess.nonOffsetAccessible
+			count: 2
+			path: src/AniListApi.php
+
+		-
+			message: '#^Cannot access offset ''mediaList'' on mixed\.$#'
+			identifier: offsetAccess.nonOffsetAccessible
+			count: 2
+			path: src/AniListApi.php
+
+		-
+			message: '#^Parameter \#1 \$errors of method Phlix\\Plugins\\Metadata\\AniList\\AniListApi\:\:formatGraphQLErrors\(\) expects array\<array\<string, mixed\>\>, array\<mixed, mixed\> given\.$#'
+			identifier: argument.type
+			count: 1
+			path: src/AniListApi.php
+
+		-
+			message: '#^Property Phlix\\Plugins\\Metadata\\AniList\\AniListApi\:\:\$logger is never read, only written\.$#'
+			identifier: property.onlyWritten
+			count: 1
+			path: src/AniListApi.php
+
+		-
+			message: '#^Access to an undefined property Phlix\\Shared\\Events\\Library\\LibraryScanCompleted\:\:\$mediaItemIds\.$#'
+			identifier: property.notFound
+			count: 2
+			path: src/AniListPlugin.php
+
+		-
+			message: '#^Access to an undefined property Phlix\\Shared\\Events\\Library\\LibraryScanCompleted\:\:\$profileId\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/AniListPlugin.php
+
+		-
+			message: '#^Access to property \$metadata on an unknown class Phlix\\Media\\Library\\MediaItem\.$#'
+			identifier: class.notFound
+			count: 3
+			path: src/AniListPlugin.php
+
+		-
+			message: '#^Access to property \$name on an unknown class Phlix\\Media\\Library\\MediaItem\.$#'
+			identifier: class.notFound
+			count: 1
+			path: src/AniListPlugin.php
+
+		-
+			message: '#^Access to property \$type on an unknown class Phlix\\Media\\Library\\MediaItem\.$#'
+			identifier: class.notFound
+			count: 2
+			path: src/AniListPlugin.php
+
+		-
+			message: '#^Call to method findById\(\) on an unknown class Phlix\\Media\\Library\\ItemRepository\.$#'
+			identifier: class.notFound
+			count: 2
+			path: src/AniListPlugin.php
+
+		-
+			message: '#^Call to method updateMetadata\(\) on an unknown class Phlix\\Media\\Library\\ItemRepository\.$#'
+			identifier: class.notFound
+			count: 1
+			path: src/AniListPlugin.php
+
+		-
+			message: '#^Call to method updateMetadataByExternalId\(\) on an unknown class Phlix\\Media\\Library\\ItemRepository\.$#'
+			identifier: class.notFound
+			count: 1
+			path: src/AniListPlugin.php
+
+		-
+			message: '#^Call to static method add\(\) on an unknown class Workerman\\Timer\.$#'
+			identifier: class.notFound
+			count: 1
+			path: src/AniListPlugin.php
+
+		-
+			message: '#^Call to static method fromRow\(\) on an unknown class Phlix\\Media\\Library\\MediaItem\.$#'
+			identifier: class.notFound
+			count: 1
+			path: src/AniListPlugin.php
+
+		-
+			message: '#^Cannot access offset ''english'' on mixed\.$#'
+			identifier: offsetAccess.nonOffsetAccessible
+			count: 1
+			path: src/AniListPlugin.php
+
+		-
+			message: '#^Cannot access offset ''extraLarge'' on mixed\.$#'
+			identifier: offsetAccess.nonOffsetAccessible
+			count: 1
+			path: src/AniListPlugin.php
+
+		-
+			message: '#^Cannot access offset ''large'' on mixed\.$#'
+			identifier: offsetAccess.nonOffsetAccessible
+			count: 1
+			path: src/AniListPlugin.php
+
+		-
+			message: '#^Cannot access offset ''native'' on mixed\.$#'
+			identifier: offsetAccess.nonOffsetAccessible
+			count: 1
+			path: src/AniListPlugin.php
+
+		-
+			message: '#^Cannot access offset ''romaji'' on mixed\.$#'
+			identifier: offsetAccess.nonOffsetAccessible
+			count: 2
+			path: src/AniListPlugin.php
+
+		-
+			message: '#^Class Phlix\\Media\\Library\\ItemRepository not found\.$#'
+			identifier: class.notFound
+			count: 2
+			path: src/AniListPlugin.php
+
+		-
+			message: '#^Method Phlix\\Plugins\\Metadata\\AniList\\AniListPlugin\:\:findMediaItem\(\) has invalid return type Phlix\\Media\\Library\\MediaItem\.$#'
+			identifier: class.notFound
+			count: 2
+			path: src/AniListPlugin.php
+
+		-
+			message: '#^Parameter \#1 \$string of function mb_substr expects string, string\|null given\.$#'
+			identifier: argument.type
+			count: 1
+			path: src/AniListPlugin.php
+
+		-
+			message: '#^Parameter \$mediaItem of method Phlix\\Plugins\\Metadata\\AniList\\AniListPlugin\:\:findExternalId\(\) has invalid type Phlix\\Media\\Library\\MediaItem\.$#'
+			identifier: class.notFound
+			count: 2
+			path: src/AniListPlugin.php
+
+		-
+			message: '#^Property Phlix\\Plugins\\Metadata\\AniList\\AniListPlugin\:\:\$itemRepository has unknown class Phlix\\Media\\Library\\ItemRepository as its type\.$#'
+			identifier: class.notFound
+			count: 1
+			path: src/AniListPlugin.php
+
+		-
+			message: '#^Method Phlix\\Plugins\\Metadata\\AniList\\HttpClient\:\:request\(\) should return array\<string, mixed\> but returns array\<mixed, mixed\>\.$#'
+			identifier: return.type
+			count: 1
+			path: src/HttpClient.php
+
+		-
+			message: '#^Parameter \#1 \$json of function json_decode expects string, string\|true given\.$#'
+			identifier: argument.type
+			count: 1
+			path: src/HttpClient.php
+
+		-
+			message: '#^Parameter \#2 \$options of function curl_setopt_array expects array\{10002\: non\-empty\-string, 19913\: bool, 13\: int, 10023\: array\<int, string\>\}, array\{10002\: string, 19913\: true, 13\: 30, 10023\: list\<non\-falsy\-string\>\} given\.$#'
+			identifier: argument.type
+			count: 1
+			path: src/HttpClient.php
+
+		-
+			message: '#^Parameter \#3 \$value of function curl_setopt expects array\|string, string\|false given\.$#'
+			identifier: argument.type
+			count: 1
+			path: src/HttpClient.php
