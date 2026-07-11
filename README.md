@@ -35,14 +35,16 @@ php bin/phlix plugin:install https://github.com/detain/phlix-plugin-anilist
 
 ## Settings
 
-| Setting | Type | Description |
-|---|---|---|
-| `enabled` | bool | Enable the AniList metadata provider. |
-| `access_token` | — | AniList API token (managed automatically). |
-| `username` | string | Your AniList username for watchlist sync. |
-| `sync_enabled` | bool | Sync watchlist status with AniList. |
-| `sync_interval_minutes` | int | How often to sync watchlist (minutes). |
-| `auto_match` | bool | Auto-match local media to AniList entries. |
+Configure these in the Phlix admin **Plugins → Configure** dialog.
+
+| Setting | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `enabled` | bool | no | `false` | Master on/off for AniList sync/matching. |
+| `access_token` | string (secret) | no | — | Set **automatically** when you authorize Phlix with AniList — not entered by hand. Register a client at [anilist.co/settings/developer](https://anilist.co/settings/developer) only if you self-host credentials. |
+| `username` | string | no | — | Display-only: the AniList account Phlix is linked to. |
+| `sync_enabled` | bool | no | `true` | Sync watched/progress with your AniList list. |
+| `sync_interval_minutes` | int | no | `60` | How often to sync with AniList. |
+| `auto_match` | bool | no | `true` | Auto-match anime to AniList entries using external IDs. |
 
 ## Development
 

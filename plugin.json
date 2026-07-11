@@ -1,7 +1,7 @@
 {
     "name": "phlix-plugin-anilist",
-    "version": "0.1.0",
-    "phlix_min_server_version": "0.14.0",
+    "version": "0.2.0",
+    "phlix_min_server_version": "1.2.0",
     "type": "metadata-provider",
     "entry": "Phlix\\Plugins\\Metadata\\AniList\\AniListPlugin",
     "events": [
@@ -12,33 +12,47 @@
         "enabled": {
             "type": "boolean",
             "default": false,
-            "description": "Enable AniList metadata provider"
+            "required": false,
+            "label": "Enable AniList",
+            "description": "Master on/off for AniList sync/matching. Optional; default off."
         },
         "access_token": {
             "type": "string",
             "default": null,
             "secret": true,
-            "description": "AniList API access token (encrypted at rest, managed automatically)"
+            "required": false,
+            "label": "Access Token",
+            "description": "Obtained automatically when you authorize Phlix with AniList — you do not enter this by hand. Register a client only if you self-host credentials.",
+            "link": "https://anilist.co/settings/developer",
+            "link_text": "AniList developer settings"
         },
         "username": {
             "type": "string",
             "default": "",
-            "description": "AniList username for watchlist sync"
+            "required": false,
+            "label": "AniList Username",
+            "description": "Display-only: the AniList account Phlix is linked to (set during authorization)."
         },
         "sync_enabled": {
             "type": "boolean",
             "default": true,
-            "description": "Enable watchlist status sync with AniList"
+            "required": false,
+            "label": "Enable list sync",
+            "description": "Sync watched/progress with your AniList list. Optional; default on."
         },
         "sync_interval_minutes": {
             "type": "integer",
             "default": 60,
-            "description": "How often to sync watchlist status (minutes)"
+            "required": false,
+            "label": "Sync interval (minutes)",
+            "description": "How often to sync with AniList. Optional; default 60."
         },
         "auto_match": {
             "type": "boolean",
             "default": true,
-            "description": "Automatically match local media to AniList entries using external IDs"
+            "required": false,
+            "label": "Auto-match",
+            "description": "Automatically match anime to AniList entries using external IDs. Optional; default on."
         }
     }
 }

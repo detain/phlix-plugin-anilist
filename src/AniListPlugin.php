@@ -13,6 +13,7 @@ namespace Phlix\Plugins\Metadata\AniList;
 
 use Phlix\Media\Library\ItemRepository;
 use Phlix\Media\Library\MediaItem;
+use Phlix\Shared\Plugin\ConfigurableInterface;
 use Phlix\Shared\Plugin\LifecycleInterface;
 use Phlix\Shared\Events\Library\LibraryScanCompleted;
 use Phlix\Shared\Events\Playback\PlaybackStopped;
@@ -31,7 +32,7 @@ use Psr\Log\NullLogger;
  * @package Phlix\Plugins\Metadata\AniList
  * @since 0.14.0
  */
-final class AniListPlugin implements LifecycleInterface
+final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
 {
     /**
      * Plugin type identifier used in the plugin manifest.
