@@ -449,6 +449,25 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
      *
      * @return void
      */
+    /**
+     * Resolve the configured sync interval, in seconds.
+     *
+     * The `sync_interval_minutes` setting was parsed into
+     * {@see AniListSettings::$syncIntervalMinutes} and then IGNORED — the timer
+     * used the hardcoded {@see self::SYNC_INTERVAL_SEC} constant, so changing the
+     * setting in the admin UI did nothing. This makes it real.
+     *
+     * Clamped to a one-minute floor: the value reaches us from admin input, and a
+     * zero or negative interval would arm a runaway timer inside a resident
+     * Workerman worker.
+     */
+    private function syncIntervalSeconds(): int
+    {
+        $minutes = $this->settings->syncIntervalMinutes;
+
+        return $minutes >= 1 ? $minutes * 60 : self::SYNC_INTERVAL_SEC;
+    }
+
     private function schedulePeriodicSync(ContainerInterface $container): void
     {
         if (!$this->settings->isConfigured()) {
@@ -456,7 +475,7 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
         }
 
         try {
-            \Workerman\Timer::add(self::SYNC_INTERVAL_SEC, function (): void {
+            \Workerman\Timer::add($this->syncIntervalSeconds(), function (): void {
                 $this->runScheduledSync();
             });
         } catch (\Throwable) {
