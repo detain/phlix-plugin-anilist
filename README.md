@@ -17,7 +17,8 @@ library with anime and manga metadata:
 - **Episode progress** — tracks which episodes you've completed for series.
 - **Average score & favorites** — surfaces AniList scores and favourite status.
 
-It subscribes to `phlix.library.scan.completed` and `phlix.playback.stopped`.
+It subscribes to `phlix.library.item.added` (throttled background enrichment)
+and `phlix.playback.stopped` (episode progress sync).
 
 ## Install
 
@@ -40,8 +41,8 @@ Configure these in the Phlix admin **Plugins → Configure** dialog.
 | Setting | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `enabled` | bool | no | `false` | Master on/off for AniList sync/matching. |
-| `access_token` | string (secret) | no | — | Set **automatically** when you authorize Phlix with AniList — not entered by hand. Register a client at [anilist.co/settings/developer](https://anilist.co/settings/developer) only if you self-host credentials. |
-| `username` | string | no | — | Display-only: the AniList account Phlix is linked to. |
+| `access_token` | string (secret) | no | — | Personal AniList API access token, pasted in by hand. Create one at [anilist.co/settings/developer](https://anilist.co/settings/developer). Phlix does **not** run an AniList OAuth flow. Required for list sync and writing progress back. |
+| `username` | string | no | — | Your AniList username, used to pull your lists during sync. |
 | `sync_enabled` | bool | no | `true` | Sync watched/progress with your AniList list. |
 | `sync_interval_minutes` | int | no | `60` | How often to sync with AniList. |
 | `auto_match` | bool | no | `true` | Auto-match anime to AniList entries using external IDs. |

@@ -15,7 +15,7 @@ use Phlix\Media\Library\ItemRepository;
 use Phlix\Media\Library\MediaItem;
 use Phlix\Shared\Plugin\ConfigurableInterface;
 use Phlix\Shared\Plugin\LifecycleInterface;
-use Phlix\Shared\Events\Library\LibraryScanCompleted;
+use Phlix\Shared\Events\Library\MediaItemAdded;
 use Phlix\Shared\Events\Playback\PlaybackStopped;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
@@ -24,10 +24,16 @@ use Psr\Log\NullLogger;
 /**
  * AniList metadata provider plugin entry class.
  *
- * Subscribes to LibraryScanCompleted and PlaybackStopped events to:
+ * Subscribes to MediaItemAdded and PlaybackStopped events to:
  * - Enrich media items with AniList metadata (titles, descriptions, scores, covers)
  * - Sync watchlist status (watching/watched/plantowatch) from AniList
  * - Track episode progress on completion
+ *
+ * Enrichment is never performed inline in the event handler — each new item is
+ * pushed onto a bounded in-worker queue drained by a throttled one-shot timer
+ * (one item per {@see self::ENRICH_INTERVAL_SEC}) so a large scan cannot flood
+ * AniList's ~90 req/min budget. All network I/O flows through the non-blocking
+ * {@see HttpClient}.
  *
  * @package Phlix\Plugins\Metadata\AniList
  * @since 0.14.0
@@ -44,9 +50,31 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
      */
     private const SYNC_INTERVAL_SEC = 3600;
 
+    /**
+     * Throttle between enrichment lookups, in seconds. One item per second is
+     * 60 req/min, comfortably below AniList's ~90 req/min limit.
+     */
+    private const ENRICH_INTERVAL_SEC = 1;
+
+    /**
+     * Hard cap on the enrichment backlog so a runaway scan cannot grow the queue
+     * without bound inside a resident worker.
+     */
+    private const MAX_ENRICH_QUEUE = 5000;
+
     private ?ItemRepository $itemRepository = null;
     private ?LoggerInterface $logger = null;
     private ?AniListApi $api = null;
+
+    /**
+     * Bounded FIFO of media item IDs awaiting enrichment.
+     *
+     * @var list<string>
+     */
+    private array $enrichQueue = [];
+
+    /** Whether a drain timer is currently armed (prevents double-arming). */
+    private bool $drainArmed = false;
 
     /** Disables all metadata enrichment and sync when false. */
     private bool $enabled = false;
@@ -94,18 +122,28 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
      */
     public function onEnable(ContainerInterface $container): void
     {
-        if ($this->logger instanceof NullLogger) {
-            $logger = $container->get(LoggerInterface::class);
-            $this->logger = $logger instanceof LoggerInterface ? $logger : new NullLogger();
+        // WIRE step — cheap, no network, must not throw at boot (~14 workers).
+        // Only pulls collaborators out of the container and arms a timer; the
+        // AniList API client and any HTTP are deferred to first use (the LAZY
+        // "connect" step, {@see ensureApi()}).
+        try {
+            if ($this->logger instanceof NullLogger) {
+                $logger = $container->get(LoggerInterface::class);
+                $this->logger = $logger instanceof LoggerInterface ? $logger : new NullLogger();
+            }
+
+            $itemRepo = $container->get(ItemRepository::class);
+            $this->itemRepository = $itemRepo instanceof ItemRepository ? $itemRepo : null;
+        } catch (\Throwable $e) {
+            // Never let a container miss take down worker boot.
+            $this->logger?->warning('AniList: onEnable wiring failed', [
+                'error' => $e->getMessage(),
+            ]);
         }
 
-        $itemRepo = $container->get(ItemRepository::class);
-        $this->itemRepository = $itemRepo instanceof ItemRepository ? $itemRepo : null;
-
-        $this->initApi();
-
+        // Arming a Workerman timer is non-blocking; the sync callback connects lazily.
         if ($this->settings->syncEnabled) {
-            $this->schedulePeriodicSync($container);
+            $this->schedulePeriodicSync();
         }
     }
 
@@ -131,21 +169,26 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
     public function subscribedEvents(): array
     {
         return [
-            LibraryScanCompleted::class => 'onLibraryScanCompleted',
+            MediaItemAdded::class => 'onMediaItemAdded',
             PlaybackStopped::class => 'onPlaybackStopped',
         ];
     }
 
     /**
-     * Handle library scan completion — attempt to enrich items with AniList metadata.
+     * Handle a newly added media item — queue it for throttled enrichment.
      *
-     * @param LibraryScanCompleted $event The library scan completed event
+     * NOTE: this deliberately does NOT call AniList inline. `MediaItemAdded`
+     * fires once per file during a scan, so enriching here would flood the API.
+     * Instead the ID is enqueued and drained one item per
+     * {@see self::ENRICH_INTERVAL_SEC} by {@see armDrainTimer()}.
+     *
+     * @param MediaItemAdded $event The media item added event
      *
      * @return void
      *
      * @since 0.14.0
      */
-    public function onLibraryScanCompleted(LibraryScanCompleted $event): void
+    public function onMediaItemAdded(MediaItemAdded $event): void
     {
         if (!$this->isConfigured()) {
             return;
@@ -155,14 +198,78 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
             return;
         }
 
-        $this->logger?->info('AniList: starting metadata enrichment after library scan', [
-            'profile_id' => $event->profileId,
-            'item_count' => count($event->mediaItemIds),
-        ]);
+        $this->enqueueForEnrichment($event->mediaItemId);
+    }
 
-        foreach ($event->mediaItemIds as $mediaItemId) {
-            $this->enrichMediaItem($mediaItemId);
+    /**
+     * Push a media item ID onto the bounded enrichment queue and ensure the
+     * throttled drain timer is running.
+     *
+     * @param string $mediaItemId Media item UUID
+     *
+     * @return void
+     */
+    private function enqueueForEnrichment(string $mediaItemId): void
+    {
+        if (count($this->enrichQueue) >= self::MAX_ENRICH_QUEUE) {
+            $this->logger?->warning('AniList: enrichment queue full, dropping item', [
+                'media_item_id' => $mediaItemId,
+                'queue_size' => count($this->enrichQueue),
+            ]);
+            return;
         }
+
+        $this->enrichQueue[] = $mediaItemId;
+        $this->armDrainTimer();
+    }
+
+    /**
+     * Arm a one-shot, throttled timer that drains a single queued item and
+     * re-arms itself while the queue is non-empty.
+     *
+     * A one-shot (re-arming) timer is used rather than a repeating one so the
+     * worker isn't left with an idle tick firing forever once the backlog is
+     * cleared (Workerman timers repeat by default).
+     *
+     * @return void
+     */
+    private function armDrainTimer(): void
+    {
+        if ($this->drainArmed) {
+            return;
+        }
+
+        try {
+            \Workerman\Timer::add(self::ENRICH_INTERVAL_SEC, function (): void {
+                $this->drainArmed = false;
+                $this->drainOne();
+                if ($this->enrichQueue !== []) {
+                    $this->armDrainTimer();
+                }
+            }, [], false);
+            $this->drainArmed = true;
+        } catch (\Throwable) {
+            // Timer unavailable (not inside a Workerman worker). Leave the items
+            // queued rather than draining inline; events are only dispatched in
+            // resident workers where the timer is available.
+            $this->logger?->debug('AniList: enrichment timer unavailable, deferring drain');
+        }
+    }
+
+    /**
+     * Drain and enrich a single queued media item.
+     *
+     * @return void
+     */
+    private function drainOne(): void
+    {
+        $mediaItemId = array_shift($this->enrichQueue);
+        if ($mediaItemId === null) {
+            return;
+        }
+
+        $this->ensureApi();
+        $this->enrichMediaItem($mediaItemId);
     }
 
     /**
@@ -363,15 +470,67 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
                 return;
             }
 
+            // findById() hydrates the JSON blob into the `metadata` key.
             $existingMetadata = is_array($row['metadata'] ?? null) ? $row['metadata'] : [];
-            $updatedMetadata = array_merge($existingMetadata, $metadata);
-            $this->itemRepository->updateMetadata($mediaItemId, $updatedMetadata);
+
+            // Gap-fill merge: AniList only fills fields the item does not already
+            // have; it never clobbers an existing non-empty value written by a
+            // higher-priority source (TMDB/IMDb).
+            $mergedMetadata = $this->gapFillMerge($existingMetadata, $metadata);
+            if ($mergedMetadata === $existingMetadata) {
+                return; // nothing new to contribute
+            }
+
+            // The host ItemRepository::update() takes a column => value map; the
+            // metadata blob lives in the `metadata_json` column (it is
+            // json-encoded and the derived columns re-synced inside update()).
+            $this->itemRepository->update($mediaItemId, ['metadata_json' => $mergedMetadata]);
         } catch (\Throwable $e) {
-            $this->logger?->warning('AniList: failed to update media item metadata', [
+            // Now that the write actually reaches the DB, a failure is a real
+            // fault — surface it at error level rather than swallowing it.
+            $this->logger?->error('AniList: failed to persist media item metadata', [
                 'media_item_id' => $mediaItemId,
                 'error' => $e->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * Merge new metadata into existing metadata WITHOUT clobbering existing
+     * non-empty values (gap-fill semantics).
+     *
+     * @param array<string, mixed> $existing Current metadata blob
+     * @param array<string, mixed> $incoming Candidate values from AniList
+     *
+     * @return array<string, mixed> Merged metadata
+     */
+    private function gapFillMerge(array $existing, array $incoming): array
+    {
+        $merged = $existing;
+
+        foreach ($incoming as $key => $value) {
+            if ($this->isEmptyValue($value)) {
+                continue; // nothing to contribute
+            }
+            if (array_key_exists($key, $existing) && !$this->isEmptyValue($existing[$key])) {
+                continue; // preserve the existing (higher-priority) value
+            }
+            $merged[$key] = $value;
+        }
+
+        return $merged;
+    }
+
+    /**
+     * Whether a metadata value counts as "empty" for gap-fill purposes.
+     *
+     * @param mixed $value Value to test
+     *
+     * @return bool
+     */
+    private function isEmptyValue(mixed $value): bool
+    {
+        return $value === null || $value === '' || $value === [];
     }
 
     /**
@@ -384,6 +543,7 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
      */
     private function syncProgressToAniList(int $anilistId, int $episodeNumber): void
     {
+        $this->ensureApi();
         if ($this->api === null) {
             return;
         }
@@ -412,34 +572,35 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
      */
     private function isConfigured(): bool
     {
-        return $this->enabled && $this->settings->isConfigured() && $this->api !== null;
+        return $this->enabled && $this->settings->isConfigured();
     }
 
     /**
-     * Initialize the AniList API client from current settings.
+     * Lazily build the AniList API client from the manually-configured personal
+     * access token (the "connect" step, kept out of {@see onEnable()}).
+     *
+     * The token comes solely from the `access_token` plugin setting — AniList
+     * OAuth is NOT implemented host-side, so there is no automatic token flow.
+     * Constructing the client performs no network I/O.
      *
      * @return void
      */
-    private function initApi(): void
+    private function ensureApi(): void
     {
         if ($this->api !== null) {
             return;
         }
 
-        $config = $this->loadConfig();
-
-        $accessToken = is_string($config['access_token'] ?? null) ? $config['access_token'] : '';
-        if ($accessToken === '' && $this->settings->accessToken !== null) {
-            $accessToken = $this->settings->accessToken;
+        $accessToken = $this->settings->accessToken ?? '';
+        if ($accessToken === '') {
+            return;
         }
 
-        if ($accessToken !== '') {
-            $this->api = new AniListApi(
-                new HttpClient($this->logger),
-                $accessToken,
-                $this->logger
-            );
-        }
+        $this->api = new AniListApi(
+            new HttpClient($this->logger),
+            $accessToken,
+            $this->logger ?? new NullLogger()
+        );
     }
 
     /**
@@ -468,7 +629,7 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
         return $minutes >= 1 ? $minutes * 60 : self::SYNC_INTERVAL_SEC;
     }
 
-    private function schedulePeriodicSync(ContainerInterface $container): void
+    private function schedulePeriodicSync(): void
     {
         if (!$this->settings->isConfigured()) {
             return;
@@ -493,6 +654,8 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
         if (!$this->settings->isConfigured() || !$this->settings->syncEnabled) {
             return;
         }
+
+        $this->ensureApi();
 
         try {
             $this->syncWatchlistFromAniList();
@@ -597,14 +760,43 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
             'anilist_favourite' => false,
         ];
 
-        try {
-            $this->itemRepository->updateMetadataByExternalId('mal_id', (string) $malId, $metadata);
-        } catch (\Throwable $e) {
-            $this->logger?->debug('AniList: failed to update watchlist status', [
-                'mal_id' => $malId,
-                'error' => $e->getMessage(),
-            ]);
+        // The host has no "find a local item by an arbitrary metadata field"
+        // method, so watchlist status cannot yet be mapped back to a local row.
+        // Route through the same real update() seam once an ID is resolvable —
+        // see resolveMediaItemIdByMalId() for the Wave 2 host-API gap.
+        $mediaItemId = $this->resolveMediaItemIdByMalId($malId);
+        if ($mediaItemId === null) {
+            $this->logger?->debug(
+                'AniList: cannot map MAL id to a local media item; watchlist status skipped '
+                . '(needs a host lookup-by-metadata API — Wave 2)',
+                ['mal_id' => $malId]
+            );
+            return;
         }
+
+        // Watchlist fields are authoritative for the AniList namespace, so write
+        // them straight through the same persistence path as enrichment.
+        $this->updateMediaItemMetadata($mediaItemId, $metadata);
+    }
+
+    /**
+     * Resolve a local media item ID from a MyAnimeList ID stored in the item's
+     * metadata blob.
+     *
+     * WAVE 2 GAP: the host {@see ItemRepository} exposes no
+     * find-by-metadata-field API (only findById/findByPath/findByIds/search),
+     * so there is currently no way to locate the row whose
+     * `metadata_json.mal_id` matches. Until the host provides one (e.g.
+     * `ItemRepository::findByMetadataField('mal_id', $value): ?array`) this
+     * returns null and the caller logs the skip — it never silently vanishes.
+     *
+     * @param int $malId MyAnimeList ID
+     *
+     * @return string|null Resolved media item UUID, or null when unresolvable
+     */
+    private function resolveMediaItemIdByMalId(int $malId): ?string
+    {
+        return null;
     }
 
     /**
@@ -626,25 +818,6 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
         }
 
         return MediaItem::fromRow($row);
-    }
-
-    /**
-     * Load AniList plugin configuration.
-     *
-     * @return array<string, mixed>
-     */
-    private function loadConfig(): array
-    {
-        $configFile = dirname(__DIR__, 5) . '/config/metadata/anilist.php';
-
-        if (is_file($configFile)) {
-            /** @var array<string, mixed> $config */
-            $config = include $configFile;
-
-            return $config;
-        }
-
-        return [];
     }
 
     /**

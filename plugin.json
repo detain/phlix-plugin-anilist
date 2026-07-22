@@ -5,7 +5,7 @@
     "type": "metadata-provider",
     "entry": "Phlix\\Plugins\\Metadata\\AniList\\AniListPlugin",
     "events": [
-        "phlix.library.scan.completed",
+        "phlix.library.item.added",
         "phlix.playback.stopped"
     ],
     "settings": {
@@ -22,7 +22,7 @@
             "secret": true,
             "required": false,
             "label": "Access Token",
-            "description": "Obtained automatically when you authorize Phlix with AniList — you do not enter this by hand. Register a client only if you self-host credentials.",
+            "description": "Paste a personal AniList API access token. Create one on the AniList developer settings page and paste it here — Phlix does not run an AniList OAuth flow. Required for list sync and writing progress back to AniList.",
             "link": "https://anilist.co/settings/developer",
             "link_text": "AniList developer settings"
         },
@@ -31,7 +31,7 @@
             "default": "",
             "required": false,
             "label": "AniList Username",
-            "description": "Display-only: the AniList account Phlix is linked to (set during authorization)."
+            "description": "Your AniList username. Used to pull your watch/read lists during sync."
         },
         "sync_enabled": {
             "type": "boolean",

@@ -50,22 +50,41 @@ if (!class_exists(\Phlix\Media\Library\MediaItem::class)) {
 }
 
 /**
- * Stub for host-supplied Phlix\Media\Library\ItemRepository class.
+ * Recording spy for the host-supplied Phlix\Media\Library\ItemRepository.
+ *
+ * Mirrors the REAL host surface used by the plugin: findById() (returns a
+ * hydrated row whose `metadata` key holds the decoded blob) and
+ * update(string $id, array $data) — the actual persistence method. It
+ * deliberately does NOT expose the non-existent updateMetadata() /
+ * updateMetadataByExternalId() so that reintroducing those defects fails.
  */
 if (!class_exists(\Phlix\Media\Library\ItemRepository::class)) {
     class ItemRepositoryStub
     {
+        /** @var array<string, array<string, mixed>> id => hydrated row */
+        public array $rows = [];
+
+        /** @var list<array{id: string, data: array<string, mixed>}> */
+        public array $updateCalls = [];
+
+        /** @var list<string> IDs whose update() should throw (simulated fault). */
+        public array $failIds = [];
+
         public function findById(string $id): ?array
         {
-            return null;
+            return $this->rows[$id] ?? null;
         }
 
-        public function updateMetadata(string $id, array $metadata): void
+        /**
+         * @param array<string, mixed> $data
+         */
+        public function update(string $id, array $data): void
         {
-        }
+            if (in_array($id, $this->failIds, true)) {
+                throw new \RuntimeException('simulated DB failure for ' . $id);
+            }
 
-        public function updateMetadataByExternalId(string $externalIdType, string $externalId, array $metadata): void
-        {
+            $this->updateCalls[] = ['id' => $id, 'data' => $data];
         }
     }
 
