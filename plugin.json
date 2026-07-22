@@ -1,6 +1,6 @@
 {
     "name": "phlix-plugin-anilist",
-    "version": "0.3.0",
+    "version": "0.4.0",
     "phlix_min_server_version": "1.2.0",
     "type": "metadata-provider",
     "entry": "Phlix\\Plugins\\Metadata\\AniList\\AniListPlugin",
@@ -13,6 +13,7 @@
             "type": "boolean",
             "default": false,
             "required": false,
+            "tier": "standard",
             "label": "Enable AniList",
             "description": "Master on/off for AniList sync/matching. Optional; default off."
         },
@@ -21,6 +22,7 @@
             "default": null,
             "secret": true,
             "required": false,
+            "tier": "standard",
             "label": "Access Token",
             "description": "Paste a personal AniList API access token. Create one on the AniList developer settings page and paste it here — Phlix does not run an AniList OAuth flow. Required for list sync and writing progress back to AniList.",
             "link": "https://anilist.co/settings/developer",
@@ -30,6 +32,7 @@
             "type": "string",
             "default": "",
             "required": false,
+            "tier": "standard",
             "label": "AniList Username",
             "description": "Your AniList username. Used to pull your watch/read lists during sync."
         },
@@ -37,6 +40,7 @@
             "type": "boolean",
             "default": true,
             "required": false,
+            "tier": "advanced",
             "label": "Enable list sync",
             "description": "Sync watched/progress with your AniList list. Optional; default on."
         },
@@ -44,6 +48,7 @@
             "type": "integer",
             "default": 60,
             "required": false,
+            "tier": "advanced",
             "label": "Sync interval (minutes)",
             "description": "How often to sync with AniList. Optional; default 60."
         },
@@ -51,6 +56,7 @@
             "type": "boolean",
             "default": true,
             "required": false,
+            "tier": "advanced",
             "label": "Auto-match",
             "description": "Automatically match anime to AniList entries using external IDs. Optional; default on."
         }
