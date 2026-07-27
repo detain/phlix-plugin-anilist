@@ -38,24 +38,27 @@ php bin/phlix plugin:install https://github.com/detain/phlix-plugin-anilist
 
 Configure these in the Phlix admin **Plugins → Configure** dialog.
 
-| Setting | Type | Required | Default | Description |
-|---|---|---|---|---|
-| `enabled` | bool | no | `false` | Master on/off for AniList sync/matching. |
-| `access_token` | string (secret) | no | — | Personal AniList API access token, pasted in by hand. Create one at [anilist.co/settings/developer](https://anilist.co/settings/developer). Phlix does **not** run an AniList OAuth flow. Required for list sync and writing progress back. |
-| `username` | string | no | — | Your AniList username, used to pull your lists during sync. |
-| `sync_enabled` | bool | no | `true` | Sync watched/progress with your AniList list. |
-| `sync_interval_minutes` | int | no | `60` | How often to sync with AniList. |
-| `auto_match` | bool | no | `true` | Auto-match anime to AniList entries using external IDs. |
+| Setting | Type | Tier | Required | Default | Description |
+|---|---|---|---|---|---|
+| `enabled` | bool | standard | no | `false` | Master on/off for AniList sync/matching. |
+| `access_token` | string (secret) | standard | no | — | Personal AniList API access token, pasted in by hand. Create one at [anilist.co/settings/developer](https://anilist.co/settings/developer). Phlix does **not** run an AniList OAuth flow. Required for list sync and writing progress back. |
+| `username` | string | standard | no | — | Your AniList username, used to pull your lists during sync. |
+| `sync_enabled` | bool | advanced | no | `true` | Sync watched/progress with your AniList list. |
+| `sync_interval_minutes` | int | advanced | no | `60` | How often to sync with AniList. |
+| `auto_match` | bool | advanced | no | `true` | Auto-match anime to AniList entries using external IDs. |
 
 ## Development
 
 ```bash
 composer install
 vendor/bin/phpunit
+vendor/bin/phpstan analyse src --level=9
+vendor/bin/phpcs src --standard=PSR12
 ```
 
 The entry class is `Phlix\Plugins\Metadata\AniList\AniListPlugin` (implements
-`Phlix\Shared\Plugin\LifecycleInterface`). It runs inside a Phlix server host,
+`Phlix\Shared\Plugin\LifecycleInterface` and
+`Phlix\Shared\Plugin\ConfigurableInterface`). It runs inside a Phlix server host,
 which provides the playback/library services at runtime.
 
 ## License
