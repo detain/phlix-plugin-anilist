@@ -51,11 +51,13 @@ final class AniListSettings
     public static function fromArray(array $data): self
     {
         return new self(
-            accessToken: is_string($data['access_token'] ?? null) ? $data['access_token'] : null,
-            username: is_string($data['username'] ?? null) ? $data['username'] : '',
-            syncEnabled: is_bool($data['sync_enabled'] ?? null) ? $data['sync_enabled'] : true,
-            syncIntervalMinutes: is_int($data['sync_interval_minutes'] ?? null) ? $data['sync_interval_minutes'] : 60,
-            autoMatch: is_bool($data['auto_match'] ?? null) ? $data['auto_match'] : true,
+            accessToken: is_string($data['access_token'] ?? null) === true ? $data['access_token'] : null,
+            username: is_string($data['username'] ?? null) === true ? $data['username'] : '',
+            syncEnabled: is_bool($data['sync_enabled'] ?? null) === true ? $data['sync_enabled'] : true,
+            syncIntervalMinutes: is_int($data['sync_interval_minutes'] ?? null) === true
+                ? $data['sync_interval_minutes']
+                : 60,
+            autoMatch: is_bool($data['auto_match'] ?? null) === true ? $data['auto_match'] : true,
         );
     }
 

@@ -81,12 +81,12 @@ class AniListApi
             'variables' => $variables,
         ], $this->headers());
 
-        if (isset($response['errors']) && is_array($response['errors'])) {
+        if (isset($response['errors']) && is_array($response['errors']) === true) {
             $message = $this->formatGraphQLErrors($response['errors']);
             throw new AniListApiException($message);
         }
 
-        return is_array($response['data'] ?? null) ? $response['data'] : [];
+        return is_array($response['data'] ?? null) === true ? $response['data'] : [];
     }
 
     /**
@@ -100,8 +100,10 @@ class AniListApi
     {
         $messages = [];
         foreach ($errors as $error) {
-            if (is_array($error) && isset($error['message'])) {
-                $messages[] = is_string($error['message']) ? $error['message'] : json_encode($error['message']);
+            if (is_array($error) === true && isset($error['message'])) {
+                $messages[] = is_string($error['message']) === true
+                    ? $error['message']
+                    : json_encode($error['message']);
             }
         }
 

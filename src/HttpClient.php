@@ -175,9 +175,9 @@ class HttpClient implements HttpClientInterface
                 $state['done'] = true;
             },
             'error' => function ($error) use (&$state): void {
-                $state['error'] = is_object($error) && method_exists($error, 'getMessage')
+                $state['error'] = is_object($error) === true && method_exists($error, 'getMessage') === true
                     ? $error->getMessage()
-                    : (is_scalar($error) ? (string) $error : 'unknown transport error');
+                    : (is_scalar($error) === true ? (string) $error : 'unknown transport error');
                 $state['done'] = true;
             },
         ];

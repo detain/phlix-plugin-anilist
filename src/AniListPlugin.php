@@ -190,11 +190,11 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
      */
     public function onMediaItemAdded(MediaItemAdded $event): void
     {
-        if (!$this->isConfigured()) {
+        if ($this->isConfigured() === false) {
             return;
         }
 
-        if (!$this->settings->autoMatch) {
+        if ($this->settings->autoMatch === false) {
             return;
         }
 
@@ -287,7 +287,7 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
             return;
         }
 
-        if (!$this->settings->syncEnabled) {
+        if ($this->settings->syncEnabled === false) {
             return;
         }
 
@@ -310,7 +310,7 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
         }
 
         $anilistId = $mediaItem->metadata['anilist_id'] ?? null;
-        if (!is_int($anilistId)) {
+        if (is_int($anilistId) === false) {
             $this->logger?->debug('AniList: no anilist_id on media item, skipping progress sync', [
                 'media_item_id' => $event->mediaItemId,
             ]);
