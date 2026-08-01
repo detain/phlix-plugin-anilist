@@ -50,6 +50,23 @@ if (!class_exists(\Phlix\Media\Library\MediaItem::class)) {
 }
 
 /**
+ * Stub for host-supplied Phlix\Shared\Events\Playback\PlaybackStopped event.
+ */
+if (!class_exists(\Phlix\Shared\Events\Playback\PlaybackStopped::class)) {
+    final class PlaybackStoppedStub
+    {
+        public function __construct(
+            public string $mediaItemId,
+            public bool $reachedEnd,
+            public int $position,
+        ) {
+        }
+    }
+
+    class_alias(PlaybackStoppedStub::class, \Phlix\Shared\Events\Playback\PlaybackStopped::class);
+}
+
+/**
  * Recording spy for the host-supplied Phlix\Media\Library\ItemRepository.
  *
  * Mirrors the REAL host surface used by the plugin: findById() (returns a

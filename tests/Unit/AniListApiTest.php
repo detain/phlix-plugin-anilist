@@ -216,6 +216,210 @@ final class AniListApiTest extends TestCase
         $this->assertSame('application/json', $http->lastHeaders['Accept'] ?? null);
         $this->assertSame('Bearer test-access-token', $http->lastHeaders['Authorization'] ?? null);
     }
+
+    public function testGetUserMangaListReturnsEntries(): void
+    {
+        $expectedList = [
+            [
+                'id' => 1,
+                'status' => 'COMPLETED',
+                'score' => 90,
+                'progress' => 0,
+                'progressVolumes' => 10,
+                'media' => [
+                    'id' => 2,
+                    'idMal' => 2,
+                    'title' => ['romaji' => 'Berserk'],
+                    'type' => 'MANGA',
+                ],
+            ],
+        ];
+
+        $http = new MockHttpClient([
+            ['data' => ['Page' => ['mediaList' => $expectedList]]]],
+        );
+        $api = new AniListApi($http, self::ACCESS_TOKEN, new NullLogger());
+
+        $result = $api->getUserMangaList('testuser', 'COMPLETED');
+
+        $this->assertCount(1, $result);
+        $this->assertSame('COMPLETED', $result[0]['status']);
+        $this->assertSame(10, $result[0]['progressVolumes']);
+    }
+
+    public function testGetUserMangaListWithoutStatusReturnsEntries(): void
+    {
+        $expectedList = [
+            [
+                'id' => 1,
+                'status' => 'PLANNING',
+                'media' => [
+                    'id' => 2,
+                    'idMal' => 2,
+                    'title' => ['romaji' => 'One Piece'],
+                    'type' => 'MANGA',
+                ],
+            ],
+        ];
+
+        $http = new MockHttpClient([
+            ['data' => ['Page' => ['mediaList' => $expectedList]]]],
+        );
+        $api = new AniListApi($http, self::ACCESS_TOKEN, new NullLogger());
+
+        $result = $api->getUserMangaList('testuser');
+
+        $this->assertCount(1, $result);
+        $this->assertSame('PLANNING', $result[0]['status']);
+    }
+
+    public function testSetFavoriteAddsFavorite(): void
+    {
+        $expectedResponse = [
+            'ToggleFavourite' => [
+                'media' => ['id' => 1],
+            ],
+        ];
+
+        $http = new MockHttpClient([['data' => $expectedResponse]]);
+        $api = new AniListApi($http, self::ACCESS_TOKEN, new NullLogger());
+
+        $result = $api->setFavorite(1, true);
+
+        $this->assertSame(['media' => ['id' => 1]], $result);
+        $this->assertSame('mutation AddFavorite($mediaId: Int) { ToggleFavourite(mediaId: $mediaId) { media { id } } }', $http->lastData['query']);
+    }
+
+    public function testSetFavoriteRemovesFavorite(): void
+    {
+        $expectedResponse = [
+            'ToggleFavourite' => [
+                'media' => ['id' => 1],
+            ],
+        ];
+
+        $http = new MockHttpClient([['data' => $expectedResponse]]);
+        $api = new AniListApi($http, self::ACCESS_TOKEN, new NullLogger());
+
+        $result = $api->setFavorite(1, false);
+
+        $this->assertSame(['media' => ['id' => 1]], $result);
+        $this->assertSame('mutation RemoveFavorite($mediaId: Int) { ToggleFavourite(mediaId: $mediaId) { media { id } } }', $http->lastData['query']);
+    }
+
+    public function testUpdateStatus(): void
+    {
+        $expectedResponse = [
+            'SaveMediaListEntry' => [
+                'id' => 1,
+                'mediaId' => 1,
+                'status' => 'COMPLETED',
+                'score' => 85,
+                'progress' => 12,
+            ],
+        ];
+
+        $http = new MockHttpClient([['data' => $expectedResponse]]);
+        $api = new AniListApi($http, self::ACCESS_TOKEN, new NullLogger());
+
+        $result = $api->updateStatus(1, 'COMPLETED', 85, 12);
+
+        $this->assertSame('COMPLETED', $result['status']);
+        $this->assertSame(85, $result['score']);
+        $this->assertSame(12, $result['progress']);
+    }
+
+    public function testUpdateStatusWithOnlyRequiredParams(): void
+    {
+        $expectedResponse = [
+            'SaveMediaListEntry' => [
+                'id' => 1,
+                'mediaId' => 1,
+                'status' => 'CURRENT',
+                'score' => 0,
+                'progress' => 0,
+            ],
+        ];
+
+        $http = new MockHttpClient([['data' => $expectedResponse]]);
+        $api = new AniListApi($http, self::ACCESS_TOKEN, new NullLogger());
+
+        $result = $api->updateStatus(1, 'CURRENT');
+
+        $this->assertSame('CURRENT', $result['status']);
+    }
+
+    public function testSaveEpisodeProgressWithOptionalScoreAndStatus(): void
+    {
+        $expectedResponse = [
+            'SaveMediaListEntry' => [
+                'id' => 1,
+                'mediaId' => 1,
+                'status' => 'COMPLETED',
+                'score' => 90,
+                'progress' => 12,
+            ],
+        ];
+
+        $http = new MockHttpClient([['data' => $expectedResponse]]);
+        $api = new AniListApi($http, self::ACCESS_TOKEN, new NullLogger());
+
+        $result = $api->saveEpisodeProgress(1, 12, 90, 'COMPLETED');
+
+        $this->assertSame(12, $result['progress']);
+        $this->assertSame(90, $result['score']);
+        $this->assertSame('COMPLETED', $result['status']);
+
+        // Verify the mutation includes the optional variables
+        $this->assertSame(90, $http->lastData['variables']['score']);
+        $this->assertSame('COMPLETED', $http->lastData['variables']['status']);
+    }
+
+    public function testAniListApiExceptionCanBeThrownAndCaught(): void
+    {
+        $http = new MockHttpClient([[
+            'errors' => [
+                ['message' => 'Test error message'],
+            ],
+        ]]);
+        $api = new AniListApi($http, self::ACCESS_TOKEN, new NullLogger());
+
+        $this->expectException(AniListApiException::class);
+        $this->expectExceptionMessage('Test error message');
+
+        $api->searchAnime('Test');
+    }
+
+    public function testFormatGraphQLErrorsHandlesMultipleErrors(): void
+    {
+        $http = new MockHttpClient([[
+            'errors' => [
+                ['message' => 'Error 1'],
+                ['message' => 'Error 2'],
+                ['message' => 'Error 3'],
+            ],
+        ]]);
+        $api = new AniListApi($http, self::ACCESS_TOKEN, new NullLogger());
+
+        $this->expectException(AniListApiException::class);
+        $this->expectExceptionMessage('Error 1; Error 2; Error 3');
+
+        $api->getMediaById(1);
+    }
+
+    public function testFormatGraphQLErrorsHandlesNonStringMessage(): void
+    {
+        $http = new MockHttpClient([[
+            'errors' => [
+                ['message' => 12345],
+            ],
+        ]]);
+        $api = new AniListApi($http, self::ACCESS_TOKEN, new NullLogger());
+
+        $this->expectException(AniListApiException::class);
+
+        $api->getMediaById(1);
+    }
 }
 
 /**
