@@ -54,6 +54,7 @@ composer install
 vendor/bin/phpunit
 vendor/bin/phpstan analyse src --level=9
 vendor/bin/phpcs src --standard=PSR12
+php scripts/security-audit-check.php
 ```
 
 The entry class is `Phlix\Plugins\Metadata\AniList\AniListPlugin` (implements
