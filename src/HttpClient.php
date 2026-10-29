@@ -23,6 +23,13 @@ use Psr\Log\NullLogger;
  * bounded 1ms tick until the async callback resolves. This never stalls the
  * resident worker the way the previous synchronous cURL implementation did.
  *
+ * TLS posture: the host-provided workerman/http-client pool defaults to
+ * certificate verification OFF, so every request here carries the strict
+ * context built by {@see self::strictTlsContext()} — verification, peer-name
+ * check, no self-signed acceptance, explicit SNI anchored to the request host.
+ * The bearer token in the Authorization header makes an unverified channel a
+ * token-theft + metadata-injection vector; there is deliberately no opt-out.
+ *
  * AniList rate-limits at roughly 90 requests/minute and answers a breach with
  * HTTP 429. {@see request()} honours a `Retry-After` header (falling back to
  * exponential backoff) and retries transparently, using a cooperative sleep so
@@ -162,7 +169,10 @@ class HttpClient implements HttpClientInterface
             'error' => null,
         ];
 
-        $client = new \Workerman\Http\Client(['timeout' => (int) self::MAX_WAIT_SEC]);
+        $client = new \Workerman\Http\Client([
+            'timeout' => (int) self::MAX_WAIT_SEC,
+            'context' => self::strictTlsContext($url),
+        ]);
 
         $options = [
             'method' => $method,
@@ -208,6 +218,38 @@ class HttpClient implements HttpClientInterface
             'body' => $state['body'],
             'retry_after' => $state['retry_after'],
         ];
+    }
+
+    /**
+     * Build a strict TLS stream context for the given request URL.
+     *
+     * The host-provided workerman/http-client pool defaults to
+     * `verify_peer => false, verify_peer_name => false, allow_self_signed =>
+     * true` (v3.1.3 ConnectionPool::create()) and SHALLOW-merges a caller-
+     * supplied `context` over those defaults, so the caller must pass a FULL
+     * `ssl` section to turn verification on — a partial one would leave the
+     * remaining lax defaults in place. This mirrors the estate idiom shipped
+     * for the same vendor family by phlix-hub (519c0c0) and
+     * phlix-server/src/Hub/HttpClient.php.
+     *
+     * `peer_name` is pinned to the URL host so a connection pooled/reused for
+     * a different host cannot silently inherit this context, and SNI is sent
+     * explicitly (the vendor only auto-sets peer_name on proxy paths).
+     *
+     * @param string $url The request URL whose host anchors the peer identity.
+     * @return array{ssl: array<string, mixed>} A complete `ssl` stream context.
+     */
+    private static function strictTlsContext(string $url): array
+    {
+        $host = parse_url($url, PHP_URL_HOST);
+
+        return ['ssl' => [
+            'verify_peer' => true,
+            'verify_peer_name' => true,
+            'allow_self_signed' => false,
+            'SNI_enabled' => true,
+            'peer_name' => is_string($host) && $host !== '' ? $host : 'graphql.anilist.co',
+        ]];
     }
 
     /**
