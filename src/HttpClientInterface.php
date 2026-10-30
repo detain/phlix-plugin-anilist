@@ -15,7 +15,6 @@ namespace Phlix\Plugins\Metadata\AniList;
  * HTTP client interface for AniList API requests.
  *
  * @package Phlix\Plugins\Metadata\AniList
- * @since 0.14.0
  */
 interface HttpClientInterface
 {

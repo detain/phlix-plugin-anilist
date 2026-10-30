@@ -19,12 +19,6 @@ parameters:
 			path: src/AniListApi.php
 
 		-
-			message: '#^Property Phlix\\Plugins\\Metadata\\AniList\\AniListApi\:\:\$logger is never read, only written\.$#'
-			identifier: property.onlyWritten
-			count: 1
-			path: src/AniListApi.php
-
-		-
 			message: '#^Access to property \$metadata on an unknown class Phlix\\Media\\Library\\MediaItem\.$#'
 			identifier: class.notFound
 			count: 3
@@ -37,9 +31,11 @@ parameters:
 			path: src/AniListPlugin.php
 
 		-
+			# W-min7: lookupAniListEntry() lost its never-read $type parameter,
+			# leaving only the `!== 'episode'` guard as an access site (was 2).
 			message: '#^Access to property \$type on an unknown class Phlix\\Media\\Library\\MediaItem\.$#'
 			identifier: class.notFound
-			count: 2
+			count: 1
 			path: src/AniListPlugin.php
 
 		-
@@ -111,12 +107,6 @@ parameters:
 		-
 			message: '#^Method Phlix\\Plugins\\Metadata\\AniList\\AniListPlugin\:\:resolveMediaItemIdByMalId\(\) never returns string so it can be removed from the return type\.$#'
 			identifier: return.unusedType
-			count: 1
-			path: src/AniListPlugin.php
-
-		-
-			message: '#^Parameter \#1 \$string of function mb_substr expects string, string\|null given\.$#'
-			identifier: argument.type
 			count: 1
 			path: src/AniListPlugin.php
 

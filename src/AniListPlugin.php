@@ -26,7 +26,8 @@ use Psr\Log\NullLogger;
  *
  * Subscribes to MediaItemAdded and PlaybackStopped events to:
  * - Enrich media items with AniList metadata (titles, descriptions, scores, covers)
- * - Sync watchlist status (watching/watched/plantowatch) from AniList
+ * - Sync watchlist status (CURRENT/COMPLETED/PLANNING/PAUSED/DROPPED; the
+ *   rarely-used REPEATING status is deliberately not synced) from AniList
  * - Track episode progress on completion
  *
  * Enrichment is never performed inline in the event handler — each new item is
@@ -36,7 +37,6 @@ use Psr\Log\NullLogger;
  * {@see HttpClient}.
  *
  * @package Phlix\Plugins\Metadata\AniList
- * @since 0.14.0
  */
 final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
 {
@@ -104,8 +104,6 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
      * @param array<string, mixed> $settings Key-value settings from plugins.settings_json
      *
      * @return void
-     *
-     * @since 0.14.0
      */
     public function configure(array $settings): void
     {
@@ -117,8 +115,6 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
      * @param ContainerInterface $container Host PSR-11 container
      *
      * @return void
-     *
-     * @since 0.14.0
      */
     public function onEnable(ContainerInterface $container): void
     {
@@ -151,8 +147,6 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
      * Release resources on disable.
      *
      * @return void
-     *
-     * @since 0.14.0
      */
     public function onDisable(): void
     {
@@ -163,8 +157,6 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
      * Return the event subscriptions for this plugin.
      *
      * @return array<class-string, string|callable>
-     *
-     * @since 0.14.0
      */
     public function subscribedEvents(): array
     {
@@ -185,8 +177,6 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
      * @param MediaItemAdded $event The media item added event
      *
      * @return void
-     *
-     * @since 0.14.0
      */
     public function onMediaItemAdded(MediaItemAdded $event): void
     {
@@ -278,8 +268,6 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
      * @param PlaybackStopped $event The playback stopped event
      *
      * @return void
-     *
-     * @since 0.14.0
      */
     public function onPlaybackStopped(PlaybackStopped $event): void
     {
@@ -343,7 +331,7 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
             return;
         }
 
-        $anilistEntry = $this->lookupAniListEntry($externalId, $mediaItem->type);
+        $anilistEntry = $this->lookupAniListEntry($externalId);
         if ($anilistEntry === null) {
             $this->logger?->debug('AniList: no entry found for external ID', [
                 'media_item_id' => $mediaItemId,
@@ -380,14 +368,17 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
     }
 
     /**
-     * Look up an entry on AniList by external ID.
+     * Look up an entry on AniList by its MyAnimeList ID.
      *
-     * @param int $externalId MyAnimeList ID or AniList ID
-     * @param string $type Media type (anime/manga)
+     * The body only ever resolves `mal_id` values via getMediaByMalId(); the
+     * former `$type` parameter and the "or AniList ID" claim in the old docblock
+     * were never honored and are gone.
+     *
+     * @param int $externalId MyAnimeList ID (from the item's `mal_id` metadata)
      *
      * @return array<string, mixed>|null The AniList entry or null
      */
-    private function lookupAniListEntry(int $externalId, string $type): ?array
+    private function lookupAniListEntry(int $externalId): ?array
     {
         if ($this->api === null) {
             return null;
@@ -423,16 +414,14 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
         return [
             'anilist_id' => is_int($entry['id'] ?? null) ? $entry['id'] : null,
             'mal_id' => is_int($entry['idMal'] ?? null) ? $entry['idMal'] : null,
-            'title_romaji' => is_string($title['romaji'] ?? null) ? $title['romaji'] : null,
-            'title_english' => is_string($title['english'] ?? null) ? $title['english'] : null,
-            'title_native' => is_string($title['native'] ?? null) ? $title['native'] : null,
-            'description' => is_string($entry['description'] ?? null)
-                ? mb_substr(preg_replace('/<[^>]+>/', '', $entry['description']), 0, 2000)
-                : null,
+            'title_romaji' => self::scrubRemoteText(self::optionalString($title['romaji'] ?? null)),
+            'title_english' => self::scrubRemoteText(self::optionalString($title['english'] ?? null)),
+            'title_native' => self::scrubRemoteText(self::optionalString($title['native'] ?? null)),
+            'description' => self::scrubRemoteText(self::descriptionText($entry['description'] ?? null)),
             'average_score' => is_int($entry['averageScore'] ?? null) ? $entry['averageScore'] : null,
             'popularity' => is_int($entry['popularity'] ?? null) ? $entry['popularity'] : null,
             'favourites' => is_int($entry['favourites'] ?? null) ? $entry['favourites'] : null,
-            'genres' => is_array($entry['genres'] ?? null) ? $entry['genres'] : [],
+            'genres' => self::stringListOrEmpty($entry['genres'] ?? null),
             'format' => is_string($entry['format'] ?? null) ? $entry['format'] : null,
             'status' => is_string($entry['status'] ?? null) ? $entry['status'] : null,
             'episodes' => is_int($entry['episodes'] ?? null) ? $entry['episodes'] : null,
@@ -441,13 +430,185 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
             'volumes' => is_int($entry['volumes'] ?? null) ? $entry['volumes'] : null,
             'season' => is_string($entry['season'] ?? null) ? $entry['season'] : null,
             'season_year' => is_int($entry['seasonYear'] ?? null) ? $entry['seasonYear'] : null,
-            'cover_image_large' => is_string($coverImage['large'] ?? null) ? $coverImage['large'] : null,
-            'cover_image_extralarge' => is_string($coverImage['extraLarge'] ?? null) ? $coverImage['extraLarge'] : null,
-            'banner_image' => is_string($entry['bannerImage'] ?? null) ? $entry['bannerImage'] : null,
-            'start_date' => $entry['startDate'] ?? null,
-            'end_date' => $entry['endDate'] ?? null,
-            'next_airing_episode' => $entry['nextAiringEpisode'] ?? null,
+            'cover_image_large' => self::httpsUrlOrNull(self::optionalString($coverImage['large'] ?? null)),
+            'cover_image_extralarge' => self::httpsUrlOrNull(self::optionalString($coverImage['extraLarge'] ?? null)),
+            'banner_image' => self::httpsUrlOrNull(self::optionalString($entry['bannerImage'] ?? null)),
+            'start_date' => $this->parseFuzzyDate($entry['startDate'] ?? null, 'startDate'),
+            'end_date' => $this->parseFuzzyDate($entry['endDate'] ?? null, 'endDate'),
+            'next_airing_episode' => $this->parseNextAiringEpisode($entry['nextAiringEpisode'] ?? null),
         ];
+    }
+
+    /**
+     * Narrow a raw remote value to string-or-null at the trust boundary.
+     *
+     * @param mixed $value Raw value decoded from the AniList response
+     *
+     * @return string|null
+     */
+    private static function optionalString(mixed $value): ?string
+    {
+        return is_string($value) ? $value : null;
+    }
+
+    /**
+     * Reduce a remote (asHtml: false) description to plain text.
+     *
+     * Markup is stripped, the result is truncated to 2000 characters, and a
+     * value that cannot be decoded is dropped rather than stored raw.
+     *
+     * @param mixed $value Raw remote `description` value
+     *
+     * @return string|null
+     */
+    private static function descriptionText(mixed $value): ?string
+    {
+        if (is_string($value) === false) {
+            return null;
+        }
+
+        $plain = preg_replace('/<[^>]+>/', '', $value);
+
+        return $plain === null ? null : mb_substr($plain, 0, 2000);
+    }
+
+    /**
+     * Scrub C0/C1 and bidi control characters out of a remote display string.
+     *
+     * AniList titles and descriptions are upstream user-editable content;
+     * invisible control or right-to-left override characters are payload that
+     * can spoof text wherever the stored value renders. Tab/LF/CR survive;
+     * undecodable input is dropped rather than stored raw.
+     *
+     * @param string|null $value Already-narrowed string candidate
+     *
+     * @return string|null
+     */
+    private static function scrubRemoteText(?string $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $scrubbed = preg_replace(
+            '/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F\x{0080}-\x{009F}'
+            . '\x{200E}-\x{200F}\x{202A}-\x{202E}\x{2066}-\x{2069}\x{FEFF}]/u',
+            '',
+            $value
+        );
+
+        return is_string($scrubbed) ? $scrubbed : null;
+    }
+
+    /**
+     * Element-wise parse of a remote string list (AniList `genres`).
+     *
+     * JSON gives no guarantees about list element types; non-strings are
+     * dropped so a malformed payload cannot inject typed garbage into
+     * metadata_json.
+     *
+     * @param mixed $value Raw remote array-or-nothing value
+     *
+     * @return list<string>
+     */
+    private static function stringListOrEmpty(mixed $value): array
+    {
+        if (is_array($value) === false) {
+            return [];
+        }
+
+        $list = [];
+        foreach ($value as $item) {
+            if (is_string($item)) {
+                $list[] = $item;
+            }
+        }
+
+        return $list;
+    }
+
+    /**
+     * Accept remote image URLs over `https:` only; anything else is nulled.
+     *
+     * Covers and banners are rendered by the SPA and fetched by clients; an
+     * `http:`, `javascript:` or unknown-scheme value from the API is not a
+     * URL this plugin will vouch for.
+     *
+     * @param string|null $value Already-narrowed string candidate
+     *
+     * @return string|null
+     */
+    private static function httpsUrlOrNull(?string $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        return parse_url($value, PHP_URL_SCHEME) === 'https' ? $value : null;
+    }
+
+    /**
+     * Parse an AniList FuzzyDate into a trusted shape before it is stored.
+     *
+     * Accepted: an array whose `year`/`month`/`day` sub-keys are each int or
+     * null (AniList sends partial dates with null components). A string, a
+     * non-array blob, or non-int components are contract violations: the field
+     * is logged away and stored as null, never raw.
+     *
+     * @param mixed $value Raw remote `startDate`/`endDate` value
+     * @param string $field Field name for the debug log
+     *
+     * @return array{year: int|null, month: int|null, day: int|null}|null
+     */
+    private function parseFuzzyDate(mixed $value, string $field): ?array
+    {
+        if (is_array($value) === true) {
+            $year = $value['year'] ?? null;
+            $month = $value['month'] ?? null;
+            $day = $value['day'] ?? null;
+
+            $componentsValid = (is_int($year) || $year === null)
+                && (is_int($month) || $month === null)
+                && (is_int($day) || $day === null);
+
+            if ($componentsValid === true && ($year !== null || $month !== null || $day !== null)) {
+                return ['year' => $year, 'month' => $month, 'day' => $day];
+            }
+        }
+
+        if ($value !== null) {
+            $this->logger?->debug('AniList: rejecting malformed date field', ['field' => $field]);
+        }
+
+        return null;
+    }
+
+    /**
+     * Parse the selected `nextAiringEpisode` fields into a trusted shape.
+     *
+     * The queries fetch exactly `{ episode airingAt }`; anything else arriving
+     * under that key is a contract violation and is dropped, not stored.
+     *
+     * @param mixed $value Raw remote `nextAiringEpisode` value
+     *
+     * @return array{episode: int, airingAt: int}|null
+     */
+    private function parseNextAiringEpisode(mixed $value): ?array
+    {
+        if (is_array($value) === true) {
+            $episode = $value['episode'] ?? null;
+            $airingAt = $value['airingAt'] ?? null;
+
+            if (is_int($episode) === true && is_int($airingAt) === true) {
+                return ['episode' => $episode, 'airingAt' => $airingAt];
+            }
+        }
+
+        if ($value !== null) {
+            $this->logger?->debug('AniList: rejecting malformed nextAiringEpisode payload');
+        }
+
+        return null;
     }
 
     /**
@@ -604,13 +765,6 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
     }
 
     /**
-     * Schedule periodic watchlist sync.
-     *
-     * @param ContainerInterface $container Host PSR-11 container
-     *
-     * @return void
-     */
-    /**
      * Resolve the configured sync interval, in seconds.
      *
      * The `sync_interval_minutes` setting was parsed into
@@ -629,6 +783,12 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
         return $minutes >= 1 ? $minutes * 60 : self::SYNC_INTERVAL_SEC;
     }
 
+    /**
+     * Arm the periodic watchlist sync timer.
+     *
+     * Takes no arguments: collaborators were moved to {@see onEnable()} long
+     * ago and the timer interval is resolved by {@see syncIntervalSeconds()}.
+     */
     private function schedulePeriodicSync(): void
     {
         if (!$this->settings->isConfigured()) {
@@ -824,8 +984,6 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
      * Get the current settings.
      *
      * @return AniListSettings
-     *
-     * @since 0.14.0
      */
     public function getSettings(): AniListSettings
     {
@@ -836,8 +994,6 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
      * Get a REDACTED settings projection safe to return to the admin SPA.
      *
      * @return array<string, mixed>
-     *
-     * @since 0.14.0
      */
     public function getSettingsForSpa(): array
     {

@@ -15,7 +15,6 @@ namespace Phlix\Plugins\Metadata\AniList;
  * Exception for AniList API errors.
  *
  * @package Phlix\Plugins\Metadata\AniList
- * @since 0.14.0
  */
 class AniListApiException extends \RuntimeException
 {

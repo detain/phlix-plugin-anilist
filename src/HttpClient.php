@@ -36,7 +36,6 @@ use Psr\Log\NullLogger;
  * the backoff does not block the loop either.
  *
  * @package Phlix\Plugins\Metadata\AniList
- * @since 0.14.0
  */
 class HttpClient implements HttpClientInterface
 {

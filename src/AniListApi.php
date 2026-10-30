@@ -19,12 +19,12 @@ use Psr\Log\NullLogger;
  *
  * Implements the AniList API for:
  * - Anime/manga search (full-text, by external ID)
- * - Watching/watched/plantowatch status management
+ * - Media-list status management (CURRENT/COMPLETED/PLANNING/PAUSED/DROPPED;
+ *   the rarely-used REPEATING status is deliberately not synced)
  * - Episode progress tracking
  * - Average score and favorites
  *
  * @package Phlix\Plugins\Metadata\AniList
- * @since 0.14.0
  */
 class AniListApi
 {
@@ -108,6 +108,22 @@ class AniListApi
         }
 
         return $messages !== [] ? implode('; ', $messages) : 'AniList GraphQL error';
+    }
+
+    /**
+     * Whether an exception reports a plain not-found answer.
+     *
+     * AniList signals "no such entry" two ways: a GraphQL error envelope
+     * whose message is "Not found" (HTTP 200 body) and a bare HTTP 404 that
+     * the transport surfaces as `AniList API returned HTTP 404: …`. Both are
+     * absence of data, not API failure, so the lookup wrappers map them to
+     * null instead of throwing.
+     */
+    private static function isNotFoundFailure(AniListApiException $e): bool
+    {
+        $message = $e->getMessage();
+
+        return str_contains($message, 'HTTP 404') || stripos($message, 'not found') !== false;
     }
 
     /**
@@ -226,11 +242,15 @@ class AniListApi
     /**
      * Look up a media entry by AniList ID.
      *
+     * A not-found answer — the GraphQL "Not found" error or an HTTP 404 from
+     * the transport — is the documented `null` outcome, not an exception;
+     * every other API failure still throws.
+     *
      * @param int $id AniList media ID
      *
-     * @return array<string, mixed>|null Media entry or null if not found
+     * @return array<string, mixed>|null Media entry, or null when no such entry exists
      *
-     * @throws AniListApiException
+     * @throws AniListApiException On any non-not-found API failure
      */
     public function getMediaById(int $id): ?array
     {
@@ -267,7 +287,17 @@ class AniListApi
         }
         GRAPHQL;
 
-        $data = $this->query($query, ['id' => $id]);
+        try {
+            $data = $this->query($query, ['id' => $id]);
+        } catch (AniListApiException $e) {
+            if (self::isNotFoundFailure($e) === false) {
+                throw $e;
+            }
+
+            $this->logger->debug('AniList: media not found', ['anilist_id' => $id]);
+
+            return null;
+        }
 
         /** @var array<string, mixed>|null */
         return $data['Media'] ?? null;
@@ -276,11 +306,15 @@ class AniListApi
     /**
      * Look up a media entry by MyAnimeList ID (idMal).
      *
+     * A not-found answer — the GraphQL "Not found" error or an HTTP 404 from
+     * the transport — is the documented `null` outcome, not an exception;
+     * every other API failure still throws.
+     *
      * @param int $malId MyAnimeList ID
      *
-     * @return array<string, mixed>|null Media entry or null if not found
+     * @return array<string, mixed>|null Media entry, or null when no such entry exists
      *
-     * @throws AniListApiException
+     * @throws AniListApiException On any non-not-found API failure
      */
     public function getMediaByMalId(int $malId): ?array
     {
@@ -317,7 +351,17 @@ class AniListApi
         }
         GRAPHQL;
 
-        $data = $this->query($query, ['idMal' => $malId]);
+        try {
+            $data = $this->query($query, ['idMal' => $malId]);
+        } catch (AniListApiException $e) {
+            if (self::isNotFoundFailure($e) === false) {
+                throw $e;
+            }
+
+            $this->logger->debug('AniList: media not found for MyAnimeList id', ['mal_id' => $malId]);
+
+            return null;
+        }
 
         /** @var array<string, mixed>|null */
         return $data['Media'] ?? null;

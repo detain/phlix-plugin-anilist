@@ -19,7 +19,6 @@ namespace Phlix\Plugins\Metadata\AniList;
  * column, loaded via Plugin::configure() on enable.
  *
  * @package Phlix\Plugins\Metadata\AniList
- * @since 0.14.0
  */
 final class AniListSettings
 {
@@ -45,8 +44,6 @@ final class AniListSettings
      * @param array<string, mixed> $data Key-value array from settings_json
      *
      * @return self
-     *
-     * @since 0.14.0
      */
     public static function fromArray(array $data): self
     {
@@ -65,8 +62,6 @@ final class AniListSettings
      * Convert settings to an array representation.
      *
      * @return array<string, mixed>
-     *
-     * @since 0.14.0
      */
     public function toArray(): array
     {
@@ -86,8 +81,6 @@ final class AniListSettings
      * signals whether the account is connected.
      *
      * @return array<string, mixed>
-     *
-     * @since 0.14.0
      */
     public function toSpaArray(): array
     {
@@ -104,8 +97,6 @@ final class AniListSettings
      * Whether an API token is present.
      *
      * @return bool True when an access token is present
-     *
-     * @since 0.14.0
      */
     public function hasToken(): bool
     {
@@ -116,8 +107,6 @@ final class AniListSettings
      * Whether the plugin is fully configured and ready to sync.
      *
      * @return bool True when hasToken() and username is non-empty
-     *
-     * @since 0.14.0
      */
     public function isConfigured(): bool
     {

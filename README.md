@@ -12,8 +12,9 @@ library with anime and manga metadata:
 
 - **Metadata enrichment** — fetches titles, descriptions, genres, average scores,
   and cover images via the AniList GraphQL API.
-- **Watchlist sync** — synchronizes your AniList watching/watched/plantowatch
-  status back to Phlix.
+- **Watchlist sync** — synchronizes your AniList status lists
+  (CURRENT/COMPLETED/PLANNING/PAUSED/DROPPED; the rarely-used REPEATING status
+  is deliberately not synced) back to Phlix.
 - **Episode progress** — tracks which episodes you've completed for series.
 - **Average score & favorites** — surfaces AniList scores and favourite status.
 

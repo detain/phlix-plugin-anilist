@@ -741,7 +741,7 @@ final class AniListPluginLifecycleTest extends TestCase
         $this->setProp($plugin, 'api', null);
         $this->setProp($plugin, 'logger', new NullLogger());
 
-        $result = $this->invoke($plugin, 'lookupAniListEntry', 123, 'anime');
+        $result = $this->invoke($plugin, 'lookupAniListEntry', 123);
 
         $this->assertNull($result);
     }
@@ -771,7 +771,7 @@ final class AniListPluginLifecycleTest extends TestCase
         $api = new AniListApi($http, 'token', new NullLogger());
         $plugin = $this->makePlugin($repo, $api, $settings);
 
-        $result = $this->invoke($plugin, 'lookupAniListEntry', 1, 'anime');
+        $result = $this->invoke($plugin, 'lookupAniListEntry', 1);
 
         $this->assertNotNull($result);
         $this->assertSame(123, $result['id']);
@@ -797,7 +797,7 @@ final class AniListPluginLifecycleTest extends TestCase
         $api = new AniListApi($http, 'token', new NullLogger());
         $plugin = $this->makePlugin($repo, $api, $settings);
 
-        $result = $this->invoke($plugin, 'lookupAniListEntry', 1, 'anime');
+        $result = $this->invoke($plugin, 'lookupAniListEntry', 1);
 
         $this->assertNull($result);
     }
