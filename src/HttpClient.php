@@ -64,6 +64,12 @@ class HttpClient implements HttpClientInterface
      */
     private const MAX_BACKOFF_SEC = 60.0;
 
+    /**
+     * Ceiling (characters) for the remote error-body excerpt carried in an
+     * exception message (see {@see self::safeErrorBodySnippet()}).
+     */
+    private const MAX_ERROR_BODY_SNIPPET = 500;
+
     private readonly LoggerInterface $logger;
 
     /**
@@ -147,7 +153,9 @@ class HttpClient implements HttpClientInterface
             }
 
             if ($status >= 400) {
-                throw new AniListApiException('AniList API returned HTTP ' . $status . ': ' . $raw['body']);
+                throw new AniListApiException(
+                    'AniList API returned HTTP ' . $status . ': ' . self::safeErrorBodySnippet($raw['body'])
+                );
             }
 
             $decoded = json_decode($raw['body'], true);
@@ -163,6 +171,51 @@ class HttpClient implements HttpClientInterface
 
             return $decoded;
         }
+    }
+
+    /**
+     * Bound a remote error body for carriage inside an exception message.
+     *
+     * Any 4xx/5xx body is fully remote-controlled: unbounded size floods the
+     * log stream, embedded newlines forge log entries, and ANSI/bidi control
+     * characters poison terminal log viewers — and call sites log this
+     * message verbatim (`'error' => $e->getMessage()`). Only a control-char
+     * stripped, whitespace-collapsed, length-capped printable excerpt is
+     * allowed to travel; the full body never leaves this method (and is not
+     * even logged at debug here — a flood-capable payload should not get a
+     * second ride into the log stream). The `HTTP <status>` prefix kept by
+     * the caller is load-bearing: {@see AniListApi::isNotFoundFailure()}
+     * matches it to map 404s to null.
+     *
+     * @param string $body Raw remote response body
+     *
+     * @return string Printable excerpt (≤ {@see self::MAX_ERROR_BODY_SNIPPET}
+     *                characters, `[truncated]` marked when capped;
+     *                '(no printable body)' when nothing was displayable)
+     */
+    private static function safeErrorBodySnippet(string $body): string
+    {
+        // Newlines are the log-forgery vector, so they collapse to spaces
+        // first; the remaining C0/C1, DEL, bidi and zero-width families are
+        // display poison and are removed outright.
+        $flat = preg_replace(
+            '/[\x00-\x1F\x7F\x{0080}-\x{009F}\x{200B}-\x{200F}'
+            . '\x{202A}-\x{202E}\x{2066}-\x{2069}\x{FEFF}]+/u',
+            ' ',
+            $body
+        );
+
+        if (is_string($flat) === false) {
+            // Invalid UTF-8: fall back to printable ASCII only.
+            $flat = preg_replace('/[^\x20-\x7E]+/', ' ', $body) ?? '';
+        }
+
+        $flat = trim(preg_replace('/ {2,}/', ' ', $flat) ?? '');
+        if (mb_strlen($flat) > self::MAX_ERROR_BODY_SNIPPET) {
+            $flat = mb_substr($flat, 0, self::MAX_ERROR_BODY_SNIPPET) . '[truncated]';
+        }
+
+        return $flat !== '' ? $flat : '(no printable body)';
     }
 
     /**

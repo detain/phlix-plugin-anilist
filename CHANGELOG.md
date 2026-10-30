@@ -17,6 +17,15 @@ ever resolvable through the dev channel (default-branch HEAD pin, version
 ## [Unreleased] — 0.4.x development line
 
 ### Fixed
+- Review-campaign majors batch W94 (estate `anilist` majors program):
+  - remote 4xx/5xx response bodies no longer ride unbounded into exception
+    messages — and from there verbatim into server logs via every caller's
+    `'error' => $e->getMessage()`; `HttpClient` now carries only a
+    control-char-stripped, newline-free excerpt capped at 500 characters with
+    a `[truncated]` marker (placeholder `(no printable body)` when nothing was
+    displayable; invalid UTF-8 falls back to printable ASCII), preserving the
+    `HTTP <status>` prefix that `AniListApi::isNotFoundFailure()` keys the
+    404-to-null mapping on (M-ANILIST-04);
 - Review-campaign minors batch W-min7 (estate `anilist minors` program):
   - the phantom `@since 0.14.0` era tags — 19 across all 6 `src/` files, a
     number copied from the old `phlix_min_server_version` — are deleted; the
