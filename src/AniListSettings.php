@@ -30,12 +30,33 @@ final class AniListSettings
      * @param bool $autoMatch Whether to auto-match local media to AniList entries
      */
     public function __construct(
-        public readonly ?string $accessToken = null,
+        private readonly ?string $accessToken = null,
         public readonly string $username = '',
         public readonly bool $syncEnabled = true,
         public readonly int $syncIntervalMinutes = 60,
         public readonly bool $autoMatch = true,
     ) {
+    }
+
+    /**
+     * The raw AniList access token, or null when not connected.
+     *
+     * CUSTODY (M-ANILIST-11): this is a bearer secret. The property is private,
+     * so the serializers that respect visibility — `json_encode()`, `(array)`
+     * casts — cannot carry it; `print_r`/`var_export` dump ALL properties by
+     * language design and are developer-only tools (nothing in this plugin
+     * pipes them to logs or a wire). {@see toArray()} omits the token unless
+     * the caller explicitly
+     * asks for the persisted shape. Only {@see toSpaArray()} may reach a wire
+     * response, and it never carries the token (existence is signaled via
+     * `has_token`). Prefer {@see hasToken()} for existence checks; read the
+     * token itself only where the Authorization header is built.
+     *
+     * @return string|null The access token, or null when unset
+     */
+    public function accessToken(): ?string
+    {
+        return $this->accessToken;
     }
 
     /**
@@ -61,17 +82,30 @@ final class AniListSettings
     /**
      * Convert settings to an array representation.
      *
+     * The bearer token is OMITTED by default (M-ANILIST-11): this general
+     * shape is what callers log, diff and hand to generic serializers, and a
+     * secret must not ride along unasked. Only the host settings persistence
+     * round-trip needs the full shape — it passes `$includeSecret: true`.
+     * Wire/UI projection remains {@see toSpaArray()}.
+     *
+     * @param bool $includeSecret Include the raw access_token (persistence only)
+     *
      * @return array<string, mixed>
      */
-    public function toArray(): array
+    public function toArray(bool $includeSecret = false): array
     {
-        return [
-            'access_token' => $this->accessToken,
+        $data = [
             'username' => $this->username,
             'sync_enabled' => $this->syncEnabled,
             'sync_interval_minutes' => $this->syncIntervalMinutes,
             'auto_match' => $this->autoMatch,
         ];
+
+        if ($includeSecret === true) {
+            $data['access_token'] = $this->accessToken;
+        }
+
+        return $data;
     }
 
     /**

@@ -89,7 +89,7 @@ final class AniListPluginLifecycleTest extends TestCase
         $result = $plugin->getSettings();
 
         $this->assertSame($settings, $result);
-        $this->assertSame('my-token', $result->accessToken);
+        $this->assertSame('my-token', $result->accessToken());
         $this->assertSame('myuser', $result->username);
         $this->assertFalse($result->syncEnabled);
         $this->assertSame(30, $result->syncIntervalMinutes);

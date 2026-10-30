@@ -76,6 +76,20 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
     /** Whether a drain timer is currently armed (prevents double-arming). */
     private bool $drainArmed = false;
 
+    /**
+     * mal_id => AniList entry (null = definitive not-found), scoped to one
+     * drain cycle (M-ANILIST-15).
+     *
+     * A burst of stop events can carry several items of the SAME series (same
+     * mal_id), and each queued item re-hit getMediaByMalId() for it. Transient
+     * failures are deliberately NOT memoized — a transport hiccup is not a
+     * definitive absence — and the memo resets when the queue runs dry so a
+     * later cycle re-resolves fresh.
+     *
+     * @var array<int, array<string, mixed>|null>
+     */
+    private array $lookupMemo = [];
+
     /** Disables all metadata enrichment and sync when false. */
     private bool $enabled = false;
 
@@ -233,9 +247,11 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
             \Workerman\Timer::add(self::ENRICH_INTERVAL_SEC, function (): void {
                 $this->drainArmed = false;
                 $this->drainOne();
-                if ($this->enrichQueue !== []) {
-                    $this->armDrainTimer();
+                if ($this->enrichQueue === []) {
+                    $this->resetLookupMemo();
+                    return;
                 }
+                $this->armDrainTimer();
             }, [], false);
             $this->drainArmed = true;
         } catch (\Throwable) {
@@ -384,11 +400,17 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
             return null;
         }
 
+        // Within one drain cycle an ID resolves once (M-ANILIST-15):
+        // array_key_exists (not ??) so a memoized definitive-null hit counts.
+        if (array_key_exists($externalId, $this->lookupMemo) === true) {
+            return $this->lookupMemo[$externalId];
+        }
+
         try {
             $entry = $this->api->getMediaByMalId($externalId);
-            if ($entry !== null) {
-                return $entry;
-            }
+            $this->lookupMemo[$externalId] = $entry;
+
+            return $entry;
         } catch (AniListApiException $e) {
             $this->logger?->warning('AniList: failed to look up entry by MAL ID', [
                 'mal_id' => $externalId,
@@ -397,6 +419,19 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
         }
 
         return null;
+    }
+
+    /**
+     * Drop the per-drain-cycle mal_id lookup memo.
+     *
+     * Called by the drain timer once the queue runs dry, so the next enrichment
+     * burst resolves fresh (M-ANILIST-15).
+     *
+     * @return void
+     */
+    private function resetLookupMemo(): void
+    {
+        $this->lookupMemo = [];
     }
 
     /**
@@ -697,6 +732,13 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
     /**
      * Sync episode progress to AniList.
      *
+     * Monotonic guard (M-ANILIST-15): SaveMediaListEntry overwrites `progress`
+     * blindly, so an older episode reaching this path (re-watched episode,
+     * out-of-order stop event, replay) would walk the user's saved progress
+     * BACKWARDS. The viewer's current progress is probed first and the write is
+     * skipped unless it is strictly newer. A failed probe must never block the
+     * write: on uncertainty the previous always-write behavior stands.
+     *
      * @param int $anilistId AniList media ID
      * @param int $episodeNumber Episode number completed
      *
@@ -706,6 +748,26 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
     {
         $this->ensureApi();
         if ($this->api === null) {
+            return;
+        }
+
+        try {
+            $savedProgress = $this->api->getMediaListProgress($anilistId);
+        } catch (AniListApiException $e) {
+            $savedProgress = null;
+            $this->logger?->debug('AniList: progress probe failed; writing without the monotonic check', [
+                'anilist_id' => $anilistId,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        if ($savedProgress !== null && $episodeNumber <= $savedProgress) {
+            $this->logger?->info('AniList: local progress is not newer than saved; skipping write', [
+                'anilist_id' => $anilistId,
+                'episode' => $episodeNumber,
+                'saved_progress' => $savedProgress,
+            ]);
+
             return;
         }
 
@@ -752,7 +814,7 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
             return;
         }
 
-        $accessToken = $this->settings->accessToken ?? '';
+        $accessToken = $this->settings->accessToken() ?? '';
         if ($accessToken === '') {
             return;
         }
@@ -917,7 +979,10 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
             'anilist_status' => $status,
             'anilist_score' => is_int($entry['score'] ?? null) ? $entry['score'] : null,
             'anilist_progress' => is_int($entry['progress'] ?? null) ? $entry['progress'] : null,
-            'anilist_favourite' => false,
+            // The AniList favourite flag is deliberately absent: this path never
+            // fetches it, and hardcoding it false wrote a lie into metadata_json
+            // (it is also excluded from the gap-fill merge, so the false could
+            // never be corrected by a later enrichment pass) — M-ANILIST-14.
         ];
 
         // The host has no "find a local item by an arbitrary metadata field"

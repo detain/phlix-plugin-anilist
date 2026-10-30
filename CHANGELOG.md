@@ -47,6 +47,26 @@ ever resolvable through the dev channel (default-branch HEAD pin, version
     namespace `Phlix\Tests\Unit\Plugins\Metadata\AniList` the composer
     autoload map expects — under its old name it was silently excluded from
     autoload (M-ANILIST-19).
+- Review-campaign minors batch W-min9:
+  - a numeric `Retry-After` above the 60s ceiling is no longer obeyed
+    (misconfigured proxy or hostile header would park the resident cooperative
+    worker for minutes); such attempts fall back to the plugin's own
+    exponential ladder (M-ANILIST-09);
+  - the watchlist write no longer hardcodes the AniList favourite flag to
+    `false` although no path ever fetches it — and gap-fill preserves existing
+    values, so the lie could never be corrected (rows already carrying the
+    stale key are untouched data history; new writes omit it) (M-ANILIST-14);
+  - progress sync is monotonic-safe: the viewer's saved `progress` is probed
+    via `Media.mediaListEntry` (field verified against the live schema) and a
+    non-newer local episode skips the write instead of walking AniList's
+    progress backwards; a failed probe fail-softs to the old write (M-ANILIST-15);
+  - `mal_id` → entry lookups are memoized for the lifetime of one enrichment
+    drain cycle (definitive not-found answers memoized, transient failures
+    are not; memo resets when the queue runs dry) (M-ANILIST-15);
+  - the cooperative request wait deadlines against monotonic wall time
+    (`hrtime(true)`) instead of counting nominal 1ms ticks, which understated
+    elapsed time on a loaded worker and stretched the real wait by the tick
+    overrun factor (M-ANILIST-17).
 
 ### Changed
 - The composer manifest tells the truth (M-ANILIST-05/07):
@@ -60,12 +80,20 @@ ever resolvable through the dev channel (default-branch HEAD pin, version
 - `AniListApi::setFavorite()` (bool argument the API never echoed back) is
   replaced by `toggleFavorite(int $mediaId)`, issuing the single AniList
   `ToggleFavourite` mutation whose result is the toggled entry (M-ANILIST-18).
+- `AniListSettings::$accessToken` is private and read through the explicit
+  `accessToken()` accessor; `toArray()` omits the bearer token unless the
+  caller passes `$includeSecret`, and only `toSpaArray()` (which never
+  carries it) may reach a wire — the host contract is now documented at the
+  holder (M-ANILIST-11).
 
 ### Added
 - This CHANGELOG (`anilist minors` docs-truth batch).
 - `tests/Unit/AniListMinorsW8Test.php` pins the composer-manifest truths,
   the `toggleFavorite` shape, and the public-API docblock annotations;
   `AniListHttpClientTlsTest` gained a per-host client-reuse pin (W-min8).
+- `tests/Unit/AniListMinorsW9Test.php` pins the Retry-After ceiling, the
+  token-custody law, the monotonic progress guard, the drain-cycle lookup
+  memo, and the wall-time wait deadline (W-min9).
 
 ## 0.4.x era (untagged on master)
 

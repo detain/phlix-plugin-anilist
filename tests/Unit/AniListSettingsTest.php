@@ -20,7 +20,7 @@ final class AniListSettingsTest extends TestCase
     {
         $settings = new AniListSettings();
 
-        $this->assertNull($settings->accessToken);
+        $this->assertNull($settings->accessToken());
         $this->assertSame('', $settings->username);
         $this->assertTrue($settings->syncEnabled);
         $this->assertSame(60, $settings->syncIntervalMinutes);
@@ -39,7 +39,7 @@ final class AniListSettingsTest extends TestCase
 
         $settings = AniListSettings::fromArray($data);
 
-        $this->assertSame('test-token-123', $settings->accessToken);
+        $this->assertSame('test-token-123', $settings->accessToken());
         $this->assertSame('testuser', $settings->username);
         $this->assertFalse($settings->syncEnabled);
         $this->assertSame(120, $settings->syncIntervalMinutes);
@@ -54,7 +54,7 @@ final class AniListSettingsTest extends TestCase
 
         $settings = AniListSettings::fromArray($data);
 
-        $this->assertNull($settings->accessToken);
+        $this->assertNull($settings->accessToken());
         $this->assertSame('testuser', $settings->username);
         $this->assertTrue($settings->syncEnabled);
         $this->assertSame(60, $settings->syncIntervalMinutes);
@@ -71,9 +71,12 @@ final class AniListSettingsTest extends TestCase
             autoMatch: false,
         );
 
-        $array = $settings->toArray();
+        // M-ANILIST-11 custody law: the general shape omits the bearer token
+        // unless the caller explicitly asks for the persisted shape.
+        $array = $settings->toArray(true);
 
         $this->assertSame('token-abc', $array['access_token']);
+        $this->assertArrayNotHasKey('access_token', $settings->toArray());
         $this->assertSame('animefan', $array['username']);
         $this->assertFalse($array['sync_enabled']);
         $this->assertSame(30, $array['sync_interval_minutes']);

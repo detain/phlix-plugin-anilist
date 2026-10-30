@@ -33,7 +33,10 @@ use Psr\Log\NullLogger;
  * AniList rate-limits at roughly 90 requests/minute and answers a breach with
  * HTTP 429. {@see request()} honours a `Retry-After` header (falling back to
  * exponential backoff) and retries transparently, using a cooperative sleep so
- * the backoff does not block the loop either.
+ * the backoff does not block the loop either. A server-supplied delay above
+ * {@see self::MAX_BACKOFF_SEC} is not obeyed — AniList's own limit windows are
+ * short, so anything longer is a misconfiguration or a hostile header, and
+ * waiting it out would stall the resident sync worker (M-ANILIST-09).
  *
  * @package Phlix\Plugins\Metadata\AniList
  */
@@ -50,6 +53,16 @@ class HttpClient implements HttpClientInterface
 
     /** Base backoff (seconds) when the server sends no usable Retry-After. */
     private const DEFAULT_BACKOFF_SEC = 2.0;
+
+    /**
+     * Ceiling (seconds) for a server-supplied Retry-After delay.
+     *
+     * AniList's rate-limit windows are seconds-to-minutes short, so a longer
+     * value is a misconfigured proxy or an adversarial header. Obeying it
+     * would park the resident cooperative worker for its full duration; the
+     * ladder in {@see retryAfterSeconds()} handles those attempts instead.
+     */
+    private const MAX_BACKOFF_SEC = 60.0;
 
     private readonly LoggerInterface $logger;
 
@@ -220,10 +233,13 @@ class HttpClient implements HttpClientInterface
         $client->request($url, $options);
 
         // Cooperative wait — yields to the event loop so other tasks proceed.
-        $waited = 0.0;
-        while ($state['done'] === false && $waited < self::MAX_WAIT_SEC) {
+        // The budget is measured against monotonic wall time, not a count of
+        // nominal ticks: on a loaded worker each tick can take far longer than
+        // TICK_SEC, and counting ticks would silently stretch the real wait by
+        // the overrun factor (M-ANILIST-17).
+        $deadlineNs = hrtime(true) + (int) (self::MAX_WAIT_SEC * 1_000_000_000);
+        while ($state['done'] === false && hrtime(true) < $deadlineNs) {
             $this->tick();
-            $waited += self::TICK_SEC;
         }
 
         if ($state['error'] !== null) {
@@ -313,6 +329,12 @@ class HttpClient implements HttpClientInterface
     /**
      * Resolve the backoff interval for a 429, honouring Retry-After when present.
      *
+     * A numeric Retry-After within {@see self::MAX_BACKOFF_SEC} is obeyed as the
+     * server asked. Above the ceiling it is NOT — AniList's own limit windows are
+     * short, so a multi-minute delay means a broken proxy or a hostile header,
+     * and a cooperative worker must not park on it; such attempts fall back to
+     * the exponential ladder (M-ANILIST-09).
+     *
      * @param string|null $retryAfter Raw Retry-After header value (delta-seconds)
      * @param int $attempt Zero-indexed retry attempt
      *
@@ -320,8 +342,11 @@ class HttpClient implements HttpClientInterface
      */
     private function retryAfterSeconds(?string $retryAfter, int $attempt): float
     {
-        if ($retryAfter !== null && is_numeric($retryAfter)) {
-            return max(0.0, (float) $retryAfter);
+        if ($retryAfter !== null && is_numeric($retryAfter) === true) {
+            $seconds = max(0.0, (float) $retryAfter);
+            if ($seconds <= self::MAX_BACKOFF_SEC) {
+                return $seconds;
+            }
         }
 
         // Exponential backoff: 2s, 4s, 8s ...

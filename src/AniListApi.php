@@ -377,6 +377,54 @@ class AniListApi
     }
 
     /**
+     * The authorized viewer's saved progress for a media entry, if any.
+     *
+     * AniList scopes `Media.mediaListEntry` to the token's owner (verified
+     * against the live schema by introspection: Media.mediaListEntry →
+     * MediaList.progress: Int), so this answers "how far has THIS user
+     * watched" — the value the monotonic write guard in
+     * {@see AniListPlugin::syncProgressToAniList()} compares against.
+     *
+     * @param int $mediaId AniList media ID
+     *
+     * @return int|null Current progress, or null when there is no entry or the
+     *                  answer is malformed (a missing entry and junk shape are
+     *                  both "nothing to compare against")
+     *
+     * @throws AniListApiException Transport/API failure (caller fail-sots)
+     */
+    public function getMediaListProgress(int $mediaId): ?int
+    {
+        $query = <<<'GRAPHQL'
+        query GetMediaListProgress($id: Int) {
+            Media(id: $id) {
+                mediaListEntry {
+                    progress
+                }
+            }
+        }
+        GRAPHQL;
+
+        $data = $this->query($query, ['id' => $mediaId]);
+
+        /** @var mixed $media */
+        $media = $data['Media'] ?? null;
+        if (is_array($media) === false) {
+            return null;
+        }
+
+        /** @var mixed $entry */
+        $entry = $media['mediaListEntry'] ?? null;
+        if (is_array($entry) === false) {
+            return null;
+        }
+
+        $progress = $entry['progress'] ?? null;
+
+        return is_int($progress) === true ? $progress : null;
+    }
+
+    /**
      * Get a user's anime list with status filtering.
      *
      * @param string $username AniList username
