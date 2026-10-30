@@ -258,13 +258,7 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
 
         try {
             \Workerman\Timer::add(self::ENRICH_INTERVAL_SEC, function (): void {
-                $this->drainArmed = false;
-                $this->drainOne();
-                if ($this->enrichQueue === []) {
-                    $this->resetLookupMemo();
-                    return;
-                }
-                $this->armDrainTimer();
+                $this->onDrainTick();
             }, [], false);
             $this->drainArmed = true;
         } catch (\Throwable) {
@@ -273,6 +267,41 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
             // resident workers where the timer is available.
             $this->logger?->debug('AniList: enrichment timer unavailable, deferring drain');
         }
+    }
+
+    /**
+     * Run one drain-timer tick: drain a single item, then re-arm while the
+     * queue still has backlog.
+     *
+     * The tick is extracted from the timer callback (and the drain guarded)
+     * because the timer is one-shot: if a throwing item escaped the callback,
+     * the spent timer would never re-arm and every queued item behind it would
+     * strand until some unrelated event happened to arm a new one. A faulting
+     * item is therefore logged and dropped from the queue (drainOne() pops
+     * before work), and the walk always continues (M-ANILIST-06).
+     *
+     * @return void
+     */
+    private function onDrainTick(): void
+    {
+        $this->drainArmed = false;
+
+        try {
+            $this->drainOne();
+        } catch (\Throwable $e) {
+            $this->logger?->warning('AniList: enrichment drain tick failed', [
+                'error' => $e->getMessage(),
+                'queue_size' => count($this->enrichQueue),
+            ]);
+        }
+
+        if ($this->enrichQueue === []) {
+            $this->resetLookupMemo();
+
+            return;
+        }
+
+        $this->armDrainTimer();
     }
 
     /**

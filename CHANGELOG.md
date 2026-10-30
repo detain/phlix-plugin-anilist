@@ -18,6 +18,14 @@ ever resolvable through the dev channel (default-branch HEAD pin, version
 
 ### Fixed
 - Review-campaign majors batch W94 (estate `anilist` majors program):
+  - the enrichment drain can no longer strand its queue: the one-shot timer
+    callback ran `drainOne()` unguarded, so any item-level fault (a host
+    read error was enough) escaped after the timer was already spent — no
+    re-arm, backlog frozen until an unrelated event armed a new timer. The
+    tick is now a named `onDrainTick()` that logs-and-drops the faulting
+    item and always continues the walk (re-arm while backlog remains, memo
+    reset when it empties) — mirroring the protection the periodic sync
+    tick has always had (M-ANILIST-06);
   - watchlist sync now walks PAGES: `syncStatusList()` fetched exactly
     page 1 × 50 per status, silently truncating every watchlist beyond 50
     entries; it iterates until a short page under a stable server-side

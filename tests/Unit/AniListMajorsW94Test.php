@@ -16,6 +16,8 @@
  *   stripped, newline-free, length-bounded excerpt.
  * - M-ANILIST-05 (majors): watchlist status fetching walks every page under
  *   a stable sort and a loud capped backstop, not just page 1 x 50.
+ * - M-ANILIST-06 (majors): one drain-timer tick can never strand the queue —
+ *   a throwing item is logged, dropped, and the walk re-arms.
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  * @license   MIT
@@ -25,6 +27,7 @@ declare(strict_types=1);
 
 namespace Phlix\Tests\Unit\Plugins\Metadata\AniList;
 
+use Phlix\Media\Library\ItemRepository;
 use Phlix\Plugins\Metadata\AniList\AniListApi;
 use Phlix\Plugins\Metadata\AniList\AniListApiException;
 use Phlix\Plugins\Metadata\AniList\AniListPlugin;
@@ -296,6 +299,59 @@ final class AniListMajorsW94Test extends TestCase
         $this->assertCount(1, $http->queries);
         $this->assertStringContainsString('mediaList(userName: $userName', $http->queries[0]);
         $this->assertStringContainsString('sort: [MEDIA_ID]', $http->queries[0]);
+    }
+
+    // ------------------------------------------------ M-ANILIST-06 (majors) --
+
+    public function testDrainTickSurvivesAThrowingItemAndKeepsTheBacklogMoving(): void
+    {
+        // The drain timer is one-shot: it re-arms itself at the END of the
+        // tick callback. A throwing item (findById faulting inside
+        // enrichMediaItem) escaping the callback would burn the spent timer
+        // without re-arming and strand every queued item behind it until some
+        // unrelated event happened to re-arm (M-ANILIST-06).
+        $repo = new ItemRepository();
+        $repo->rows['m1'] = [
+            'id' => 'm1',
+            'name' => 'X',
+            'type' => 'episode',
+            'path' => '/x.mkv',
+            'metadata' => ['mal_id' => 1],
+        ];
+        $repo->findFailIds = ['m1'];
+
+        $logger = new RecordingAniListLogger();
+        $plugin = new AniListPlugin(
+            new AniListSettings(accessToken: 'token', username: 'user', syncEnabled: true),
+            $logger,
+        );
+        $p = new \ReflectionProperty($plugin, 'enabled');
+        $p->setAccessible(true);
+        $p->setValue($plugin, true);
+        $p = new \ReflectionProperty($plugin, 'itemRepository');
+        $p->setAccessible(true);
+        $p->setValue($plugin, $repo);
+        $p = new \ReflectionProperty($plugin, 'enrichQueue');
+        $p->setAccessible(true);
+        $p->setValue($plugin, ['m1', 'm2']);
+
+        $m = new \ReflectionMethod($plugin, 'onDrainTick');
+        $m->setAccessible(true);
+        $m->invoke($plugin); // must not throw
+
+        $this->assertTrue(
+            $logger->hasRecord('warning', 'drain tick failed'),
+            'the faulting item must be logged, not swallowed'
+        );
+
+        $p = new \ReflectionProperty($plugin, 'enrichQueue');
+        $p->setAccessible(true);
+        $this->assertSame(['m2'], $p->getValue($plugin), 'the poison item is dropped and backlog survives');
+
+        $this->assertTrue(
+            $logger->hasRecord('debug', 'timer unavailable'),
+            'the tick must ATTEMPT re-arm while backlog remains'
+        );
     }
 
     /**

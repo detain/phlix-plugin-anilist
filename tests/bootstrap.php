@@ -90,8 +90,15 @@ if (!class_exists(\Phlix\Media\Library\ItemRepository::class)) {
         /** @var list<string> IDs whose update() should throw (simulated fault). */
         public array $failIds = [];
 
+        /** @var list<string> IDs whose findById() should throw (host PDO fault). */
+        public array $findFailIds = [];
+
         public function findById(string $id): ?array
         {
+            if (in_array($id, $this->findFailIds, true)) {
+                throw new \RuntimeException('simulated read failure for ' . $id);
+            }
+
             return $this->rows[$id] ?? null;
         }
 
