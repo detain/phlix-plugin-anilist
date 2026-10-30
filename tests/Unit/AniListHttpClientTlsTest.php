@@ -39,10 +39,13 @@ final class FakeWorkermanHttpClientForTls
 
     public static bool $constructed = false;
 
+    public static int $constructCount = 0;
+
     /** @param array<string, mixed> $options */
     public function __construct(array $options = [])
     {
         self::$constructed = true;
+        self::$constructCount++;
         self::$lastOptions = $options;
     }
 
@@ -86,7 +89,44 @@ final class AniListHttpClientTlsTest extends TestCase
             class_alias(FakeWorkermanHttpResponseForTls::class, 'Workerman\Http\Response');
         }
         FakeWorkermanHttpClientForTls::$constructed = false;
+        FakeWorkermanHttpClientForTls::$constructCount = 0;
         FakeWorkermanHttpClientForTls::$lastOptions = [];
+    }
+
+    /**
+     * One vendor client (and therefore one connection pool / TLS handshake)
+     * per remote host: repeated dispatches to the same host must reuse the
+     * memoized instance, while a different host still gets its own strict
+     * context (no cross-host context bleed).
+     */
+    public function testRepeatedDispatchesToTheSameHostReuseOneVendorClient(): void
+    {
+        $client = new class extends HttpClient {
+            protected function tick(): void
+            {
+            }
+        };
+
+        $this->invokeSendOnce($client, 'https://graphql.anilist.co');
+        $this->invokeSendOnce($client, 'https://graphql.anilist.co');
+
+        self::assertSame(
+            1,
+            FakeWorkermanHttpClientForTls::$constructCount,
+            'the second same-host request must reuse the memoized vendor client, not rebuild the pool'
+        );
+
+        $this->invokeSendOnce($client, 'https://other.example.org/x');
+
+        self::assertSame(
+            2,
+            FakeWorkermanHttpClientForTls::$constructCount,
+            'a different host must still get its own client with its own strict context'
+        );
+        self::assertSame(
+            'other.example.org',
+            $this->strictSslSection(FakeWorkermanHttpClientForTls::$lastOptions)['peer_name']
+        );
     }
 
     /**

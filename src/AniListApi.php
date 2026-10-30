@@ -129,6 +129,9 @@ class AniListApi
     /**
      * Search for anime by title.
      *
+     * Retained as public client API (host/plugin consumers); not internal
+     * dead code.
+     *
      * @param string $search Search query
      * @param int $page Page number (1-indexed)
      * @param int $perPage Results per page (max 50)
@@ -187,6 +190,9 @@ class AniListApi
     /**
      * Search for manga by title.
      *
+     * Retained as public client API (host/plugin consumers); not internal
+     * dead code.
+     *
      * @param string $search Search query
      * @param int $page Page number (1-indexed)
      * @param int $perPage Results per page (max 50)
@@ -241,6 +247,9 @@ class AniListApi
 
     /**
      * Look up a media entry by AniList ID.
+     *
+     * Retained as public client API (host/plugin consumers); not internal
+     * dead code.
      *
      * A not-found answer — the GraphQL "Not found" error or an HTTP 404 from
      * the transport — is the documented `null` outcome, not an exception;
@@ -432,6 +441,9 @@ class AniListApi
     /**
      * Get a user's manga list with status filtering.
      *
+     * Retained as public client API (host/plugin consumers); not internal
+     * dead code.
+     *
      * @param string $username AniList username
      * @param string|null $status Filter by status (CURRENT, COMPLETED, PLANNING, PAUSED, DROPPED)
      * @param int $page Page number
@@ -538,20 +550,27 @@ class AniListApi
     }
 
     /**
-     * Mark a media entry as favorite or remove from favorites.
+     * Flip a media entry's favourite state on the viewer's list.
+     *
+     * AniList's ToggleFavourite is a toggle, not a setter: the superseded
+     * setFavorite(int, bool) promised directional control while BOTH of its
+     * branches issued the identical mutation, so the bool was inert and
+     * "remove" could actually ADD. The honest surface drops the lie. (True
+     * remove-semantics would need SaveFavourites list rewriting — a feature,
+     * deliberately out of scope here.)
+     *
+     * Retained as public client API (host/plugin consumers); not internal
+     * dead code.
      *
      * @param int $mediaId AniList media ID
-     * @param bool $favorite True to add, false to remove
      *
      * @return array<string, mixed> Updated favorite list entry
      *
      * @throws AniListApiException
      */
-    public function setFavorite(int $mediaId, bool $favorite): array
+    public function toggleFavorite(int $mediaId): array
     {
-        $mutation = $favorite
-            ? 'mutation AddFavorite($mediaId: Int) { ToggleFavourite(mediaId: $mediaId) { media { id } } }'
-            : 'mutation RemoveFavorite($mediaId: Int) { ToggleFavourite(mediaId: $mediaId) { media { id } } }';
+        $mutation = 'mutation ToggleFavorite($mediaId: Int) { ToggleFavourite(mediaId: $mediaId) { media { id } } }';
 
         $data = $this->query($mutation, ['mediaId' => $mediaId]);
 
@@ -561,6 +580,9 @@ class AniListApi
 
     /**
      * Update the overall status for a media entry.
+     *
+     * Retained as public client API (host/plugin consumers); not internal
+     * dead code.
      *
      * @param int $mediaId AniList media ID
      * @param string $status New status (CURRENT, COMPLETED, PLANNING, PAUSED, DROPPED)

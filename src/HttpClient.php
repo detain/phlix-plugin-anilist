@@ -54,6 +54,20 @@ class HttpClient implements HttpClientInterface
     private readonly LoggerInterface $logger;
 
     /**
+     * Vendor clients memoized per remote host.
+     *
+     * Fresh-constructing \Workerman\Http\Client inside sendOnce() built a new
+     * connection pool — and paid a fresh TLS handshake — per request,
+     * including per 429 retry. One instance per host amortizes the vendor's
+     * own connection pooling across the client's lifetime. The construction
+     * stays at the single site with the inline strict-context shape pinned by
+     * {@see \Phlix\Tests\Unit\Plugins\Metadata\AniList\AniListHttpClientTlsTest}.
+     *
+     * @var array<string, \Workerman\Http\Client>
+     */
+    private array $vendorClients = [];
+
+    /**
      * @param LoggerInterface|null $logger Optional PSR-3 logger
      */
     public function __construct(?LoggerInterface $logger = null)
@@ -168,10 +182,18 @@ class HttpClient implements HttpClientInterface
             'error' => null,
         ];
 
-        $client = new \Workerman\Http\Client([
-            'timeout' => (int) self::MAX_WAIT_SEC,
-            'context' => self::strictTlsContext($url),
-        ]);
+        $parsedHost = parse_url($url, PHP_URL_HOST);
+        $hostKey = is_string($parsedHost) && $parsedHost !== '' ? $parsedHost : $url;
+
+        if (!isset($this->vendorClients[$hostKey])) {
+            $client = new \Workerman\Http\Client([
+                'timeout' => (int) self::MAX_WAIT_SEC,
+                'context' => self::strictTlsContext($url),
+            ]);
+            $this->vendorClients[$hostKey] = $client;
+        }
+
+        $client = $this->vendorClients[$hostKey];
 
         $options = [
             'method' => $method,

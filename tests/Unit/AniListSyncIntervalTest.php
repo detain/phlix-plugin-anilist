@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Phlix\Tests\Unit\Plugins\AniList;
+namespace Phlix\Tests\Unit\Plugins\Metadata\AniList;
 
 use Phlix\Plugins\Metadata\AniList\AniListPlugin;
 use Phlix\Plugins\Metadata\AniList\AniListSettings;

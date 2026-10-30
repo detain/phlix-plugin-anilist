@@ -32,6 +32,9 @@ interface HttpClientInterface
     /**
      * Send a GET request to the AniList API.
      *
+     * Retained as public client API (host/plugin consumers); not internal
+     * dead code.
+     *
      * @param string $url Request URL
      * @param array<string, mixed> $params Query parameters
      * @param array<string, string> $headers HTTP headers

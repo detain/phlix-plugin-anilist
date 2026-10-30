@@ -17,7 +17,7 @@ ever resolvable through the dev channel (default-branch HEAD pin, version
 ## [Unreleased] — 0.4.x development line
 
 ### Fixed
-- Review-campaign minors batch (estate `anilist minors` program):
+- Review-campaign minors batch W-min7 (estate `anilist minors` program):
   - the phantom `@since 0.14.0` era tags — 19 across all 6 `src/` files, a
     number copied from the old `phlix_min_server_version` — are deleted; the
     plugin has only ever been v0.1.0/v0.2.0 tagged with 0.3.x/0.4.x manifest
@@ -38,9 +38,34 @@ ever resolvable through the dev channel (default-branch HEAD pin, version
   - README and class docs list the five synced statuses
     (CURRENT/COMPLETED/PLANNING/PAUSED/DROPPED; REPEATING is deliberately not
     synced) instead of the old three-name shorthand.
+- Review-campaign minors batch W-min8:
+  - `HttpClient` reuses one `Workerman\Http\Client` per destination host
+    instead of constructing a fresh vendor client (and connection pool) on
+    every dispatch; the strict TLS stream context is still built per URL so
+    `peer_name` stays correct per host (M-ANILIST-16);
+  - `tests/Unit/AniListSyncIntervalTest.php` now declares the PSR-4
+    namespace `Phlix\Tests\Unit\Plugins\Metadata\AniList` the composer
+    autoload map expects — under its old name it was silently excluded from
+    autoload (M-ANILIST-19).
+
+### Changed
+- The composer manifest tells the truth (M-ANILIST-05/07):
+  `detain/phlix-shared` is pinned to the consumed API surface at `^0.52.0`
+  (the stale `^0.21.0` let every fresh install drift the vendored contract
+  layer), `ext-mbstring` is declared for the `mb_*` calls the plugin
+  actually makes, and `workerman/http-client` moved to `suggest` — the
+  transport is host-supplied at runtime and the plugin must not claim it as
+  its own dependency. `/composer.lock` is no longer git-ignored: the lock is
+  committed so CI installs exactly the audited graph.
+- `AniListApi::setFavorite()` (bool argument the API never echoed back) is
+  replaced by `toggleFavorite(int $mediaId)`, issuing the single AniList
+  `ToggleFavourite` mutation whose result is the toggled entry (M-ANILIST-18).
 
 ### Added
 - This CHANGELOG (`anilist minors` docs-truth batch).
+- `tests/Unit/AniListMinorsW8Test.php` pins the composer-manifest truths,
+  the `toggleFavorite` shape, and the public-API docblock annotations;
+  `AniListHttpClientTlsTest` gained a per-host client-reuse pin (W-min8).
 
 ## 0.4.x era (untagged on master)
 

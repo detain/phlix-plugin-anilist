@@ -273,7 +273,7 @@ final class AniListApiTest extends TestCase
         $this->assertSame('PLANNING', $result[0]['status']);
     }
 
-    public function testSetFavoriteAddsFavorite(): void
+    public function testToggleFavoriteIssuesTheToggleMutation(): void
     {
         $expectedResponse = [
             'ToggleFavourite' => [
@@ -284,27 +284,17 @@ final class AniListApiTest extends TestCase
         $http = new MockHttpClient([['data' => $expectedResponse]]);
         $api = new AniListApi($http, self::ACCESS_TOKEN, new NullLogger());
 
-        $result = $api->setFavorite(1, true);
+        $result = $api->toggleFavorite(1);
 
         $this->assertSame(['media' => ['id' => 1]], $result);
-        $this->assertSame('mutation AddFavorite($mediaId: Int) { ToggleFavourite(mediaId: $mediaId) { media { id } } }', $http->lastData['query']);
-    }
-
-    public function testSetFavoriteRemovesFavorite(): void
-    {
-        $expectedResponse = [
-            'ToggleFavourite' => [
-                'media' => ['id' => 1],
-            ],
-        ];
-
-        $http = new MockHttpClient([['data' => $expectedResponse]]);
-        $api = new AniListApi($http, self::ACCESS_TOKEN, new NullLogger());
-
-        $result = $api->setFavorite(1, false);
-
-        $this->assertSame(['media' => ['id' => 1]], $result);
-        $this->assertSame('mutation RemoveFavorite($mediaId: Int) { ToggleFavourite(mediaId: $mediaId) { media { id } } }', $http->lastData['query']);
+        $this->assertSame(
+            'mutation ToggleFavorite($mediaId: Int) { ToggleFavourite(mediaId: $mediaId) { media { id } } }',
+            $http->lastData['query']
+        );
+        $this->assertFalse(
+            method_exists($api, 'setFavorite'),
+            'the superseded directional surface lied (both arms toggled) and must not return'
+        );
     }
 
     public function testUpdateStatus(): void

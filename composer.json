@@ -7,7 +7,8 @@
     "homepage": "https://github.com/detain/phlix-plugin-anilist",
     "require": {
         "php": ">=8.3",
-        "detain/phlix-shared": "^0.21.0",
+        "detain/phlix-shared": "^0.52.0",
+        "ext-mbstring": "*",
         "psr/container": "^1.1 || ^2.0",
         "psr/log": "^1.0 || ^2.0 || ^3.0"
     },
@@ -15,6 +16,9 @@
         "phpstan/phpstan": "^2.2",
         "phpunit/phpunit": "^10.0",
         "squizlabs/php_codesniffer": "^4.0"
+    },
+    "suggest": {
+        "workerman/http-client": "Host-supplied async transport for the AniList outbound client. The phlix server runtime ships it; without it HttpClient throws AniListApiException at dispatch instead of silently degrading."
     },
     "repositories": [
         { "type": "vcs", "url": "https://github.com/detain/phlix-shared.git" }

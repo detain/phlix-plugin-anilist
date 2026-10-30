@@ -133,3 +133,12 @@ parameters:
 			identifier: return.type
 			count: 1
 			path: src/HttpClient.php
+
+		-
+			# W-min8 (M-ANILIST-16c): the per-host vendor-client memo is typed
+			# with the host-supplied Workerman client — the same unresolvable-at-
+			# analysis-time class family the whole baseline exists for.
+			message: '#^Property Phlix\\Plugins\\Metadata\\AniList\\HttpClient\:\:\$vendorClients has unknown class Workerman\\Http\\Client as its type\.$#'
+			identifier: class.notFound
+			count: 1
+			path: src/HttpClient.php
