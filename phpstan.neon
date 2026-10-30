@@ -5,4 +5,17 @@ parameters:
     level: 9
     paths:
         - src
-    treatPhpDocTypesAsCertain: false
+    # Host-supplied classes (the phlix-server library repo and the Workerman
+    # runtime) are not in this plugin's vendor tree — they exist only inside a
+    # host worker process. Analysis-only stubs under tests/Stub/ mirror their
+    # REAL signatures so level 9 can resolve members instead of collapsing
+    # every use-site to class.notFound noise. Stubs are NOT composer-autoloaded
+    # (tests/Stub/ has no psr-4 mapping) and are signature mirrors, not mocks;
+    # drift between a stub and the host class is a bug in the stub. Posture
+    # follows the phlix-plugin-anidb precedent: stubs cure, zero suppressions.
+    bootstrapFiles:
+        - vendor/autoload.php
+        - tests/Stub/MediaItem.php
+        - tests/Stub/ItemRepository.php
+        - tests/Stub/WorkermanTimer.php
+        - tests/Stub/WorkermanHttpClient.php

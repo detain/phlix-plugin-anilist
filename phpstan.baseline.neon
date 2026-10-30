@@ -1,12 +1,36 @@
 parameters:
 	ignoreErrors:
+		# M-ANILIST-07 (phpstan level 9 honest baseline, re-derived with the
+		# tests/Stub/ host mirrors wired via phpstan.neon bootstrapFiles):
+		# the entire 12-family class.notFound block (unknown MediaItem /
+		# ItemRepository / Workerman\Timer / Workerman\Http\Client) is GONE —
+		# stub-backed uses now analyse against the real host signatures.
+		# What remains is the mixed remote-JSON shape (offsets on json_decode
+		# values), intentional defensive guards whose runtime payload is
+		# wider than the docblock claims, and one dead-stub return type —
+		# each entry attributable to concrete sites below.
 		-
+			# formatGraphQLErrors(): @param documents array<array<string,mixed>>
+			# but the caller hands it raw decoded $response['errors']; the
+			# in-loop is_array() guard is the deliberate runtime defense —
+			# annotation-vs-guard tension, not a defect (the guard must stay).
+			message: '#^Call to function is_array\(\) with array\<string, mixed\> will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: src/AniListApi.php
+
+		-
+			# Mixed-JSON boundary: offset reads on raw decoded GraphQL values
+			# (search/list entry `media` nodes). All consumers is_array-guard
+			# the node before use; phpstan cannot type json_decode fragments.
 			message: '#^Cannot access offset ''media'' on mixed\.$#'
 			identifier: offsetAccess.nonOffsetAccessible
 			count: 2
 			path: src/AniListApi.php
 
 		-
+			# Mixed-JSON boundary: `mediaList` offset under Page (anime/manga
+			# list readers) — same family as above.
 			message: '#^Cannot access offset ''mediaList'' on mixed\.$#'
 			identifier: offsetAccess.nonOffsetAccessible
 			count: 2
@@ -19,48 +43,13 @@ parameters:
 			path: src/AniListApi.php
 
 		-
-			message: '#^Access to property \$metadata on an unknown class Phlix\\Media\\Library\\MediaItem\.$#'
-			identifier: class.notFound
-			count: 3
-			path: src/AniListPlugin.php
-
-		-
-			message: '#^Access to property \$name on an unknown class Phlix\\Media\\Library\\MediaItem\.$#'
-			identifier: class.notFound
+			# Same site as the is_array entry above (`=== true` on a
+			# doc-certain value); PSR-12-house `=== true` literal style keeps
+			# the guard visible — intentional, see first entry.
+			message: '#^Strict comparison using \=\=\= between true and true will always evaluate to true\.$#'
+			identifier: identical.alwaysTrue
 			count: 1
-			path: src/AniListPlugin.php
-
-		-
-			# W-min7: lookupAniListEntry() lost its never-read $type parameter,
-			# leaving only the `!== 'episode'` guard as an access site (was 2).
-			message: '#^Access to property \$type on an unknown class Phlix\\Media\\Library\\MediaItem\.$#'
-			identifier: class.notFound
-			count: 1
-			path: src/AniListPlugin.php
-
-		-
-			message: '#^Call to method findById\(\) on an unknown class Phlix\\Media\\Library\\ItemRepository\.$#'
-			identifier: class.notFound
-			count: 2
-			path: src/AniListPlugin.php
-
-		-
-			message: '#^Call to method update\(\) on an unknown class Phlix\\Media\\Library\\ItemRepository\.$#'
-			identifier: class.notFound
-			count: 1
-			path: src/AniListPlugin.php
-
-		-
-			message: '#^Call to static method add\(\) on an unknown class Workerman\\Timer\.$#'
-			identifier: class.notFound
-			count: 2
-			path: src/AniListPlugin.php
-
-		-
-			message: '#^Call to static method fromRow\(\) on an unknown class Phlix\\Media\\Library\\MediaItem\.$#'
-			identifier: class.notFound
-			count: 1
-			path: src/AniListPlugin.php
+			path: src/AniListApi.php
 
 		-
 			message: '#^Cannot access offset ''english'' on mixed\.$#'
@@ -87,58 +76,39 @@ parameters:
 			path: src/AniListPlugin.php
 
 		-
+			# Mixed-JSON boundary: title { romaji english native } and
+			# coverImage { large extraLarge } fragment reads in
+			# buildMetadataFromEntry — every read passes through
+			# optionalString()/scrubRemoteText() narrowing.
 			message: '#^Cannot access offset ''romaji'' on mixed\.$#'
 			identifier: offsetAccess.nonOffsetAccessible
 			count: 2
 			path: src/AniListPlugin.php
 
 		-
-			message: '#^Class Phlix\\Media\\Library\\ItemRepository not found\.$#'
-			identifier: class.notFound
-			count: 2
-			path: src/AniListPlugin.php
-
-		-
-			message: '#^Method Phlix\\Plugins\\Metadata\\AniList\\AniListPlugin\:\:findMediaItem\(\) has invalid return type Phlix\\Media\\Library\\MediaItem\.$#'
-			identifier: class.notFound
-			count: 2
-			path: src/AniListPlugin.php
-
-		-
+			# Dead resolve stub (always returns null); implemented in the same
+			# majors wave (M-ANILIST-01), at which point this entry retires.
 			message: '#^Method Phlix\\Plugins\\Metadata\\AniList\\AniListPlugin\:\:resolveMediaItemIdByMalId\(\) never returns string so it can be removed from the return type\.$#'
 			identifier: return.unusedType
 			count: 1
 			path: src/AniListPlugin.php
 
 		-
-			message: '#^Parameter \$mediaItem of method Phlix\\Plugins\\Metadata\\AniList\\AniListPlugin\:\:findExternalId\(\) has invalid type Phlix\\Media\\Library\\MediaItem\.$#'
-			identifier: class.notFound
-			count: 2
-			path: src/AniListPlugin.php
-
-		-
-			message: '#^Property Phlix\\Plugins\\Metadata\\AniList\\AniListPlugin\:\:\$itemRepository has unknown class Phlix\\Media\\Library\\ItemRepository as its type\.$#'
-			identifier: class.notFound
-			count: 1
-			path: src/AniListPlugin.php
-
-		-
-			message: '#^Call to function method_exists\(\) with ''Workerman\\\\Timer'' and ''sleep'' will always evaluate to false\.$#'
-			identifier: function.impossibleType
+			# Runtime version-drift guard (workerman hosts older than the
+			# v5.2.3 mirror behind tests/Stub/ lack Timer::sleep): phpstan
+			# analyses against the stub, so the probe "always" passes. The
+			# fallback usleep() branch is live code on old hosts — guard and
+			# baseline entry both stay.
+			message: '#^Call to function method_exists\(\) with ''Workerman\\\\Timer'' and ''sleep'' will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
 			count: 1
 			path: src/HttpClient.php
 
 		-
+			# json_decode(..., true) yields array<mixed,mixed>; the declared
+			# array<string,mixed> return is the GraphQL-body contract every
+			# consumer relies on — boundary narrowing by declaration.
 			message: '#^Method Phlix\\Plugins\\Metadata\\AniList\\HttpClient\:\:request\(\) should return array\<string, mixed\> but returns array\<mixed, mixed\>\.$#'
 			identifier: return.type
-			count: 1
-			path: src/HttpClient.php
-
-		-
-			# W-min8 (M-ANILIST-16c): the per-host vendor-client memo is typed
-			# with the host-supplied Workerman client — the same unresolvable-at-
-			# analysis-time class family the whole baseline exists for.
-			message: '#^Property Phlix\\Plugins\\Metadata\\AniList\\HttpClient\:\:\$vendorClients has unknown class Workerman\\Http\\Client as its type\.$#'
-			identifier: class.notFound
 			count: 1
 			path: src/HttpClient.php

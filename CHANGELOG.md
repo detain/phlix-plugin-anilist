@@ -78,6 +78,15 @@ ever resolvable through the dev channel (default-branch HEAD pin, version
     overrun factor (M-ANILIST-17).
 
 ### Changed
+- Review-campaign majors batch W94 — analysis posture: PHPStan level 9 now
+  analyses the host-supplied classes against reality instead of around them
+  — `tests/Stub/` carries four analysis-only signature mirrors (the server
+  `MediaItem`/`ItemRepository`, Workerman `Timer` v5.2.3 and
+  `Http\Client` v3.1.3, wired via `phpstan.neon` `bootstrapFiles`, never
+  composer-autoloaded), and `phpstan.baseline.neon` is re-derived: the whole
+  12-family `class.notFound` block is cleared (23 entries / 33 errors to
+  13 entries / 16), each residual now a justified mixed-JSON or
+  deliberate-defense site with per-entry attribution (M-ANILIST-07);
 - The composer manifest tells the truth (M-ANILIST-05/07):
   `detain/phlix-shared` is pinned to the consumed API surface at `^0.52.0`
   (the stale `^0.21.0` let every fresh install drift the vendored contract
