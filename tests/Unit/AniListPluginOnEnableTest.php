@@ -207,14 +207,102 @@ final class AniListPluginOnEnableTest extends TestCase
         $this->assertNull($this->getProp($plugin, 'itemRepository'));
     }
 
-    public function testResolveMediaItemIdByMalIdAlwaysReturnsNull(): void
+    public function testResolveMediaItemIdByMalIdFindsRowThroughHostHook(): void
     {
         $repo = new ItemRepository();
+        $repo->rows['m1'] = [
+            'id' => 'm1',
+            'name' => 'Test',
+            'type' => 'episode',
+            'path' => '/x.mkv',
+            'metadata' => ['mal_id' => 12345],
+        ];
+
         $plugin = $this->makePlugin();
+        $this->setProp($plugin, 'itemRepository', $repo);
 
         $result = $this->invoke($plugin, 'resolveMediaItemIdByMalId', 12345);
 
-        $this->assertNull($result);
+        $this->assertSame('m1', $result, 'a resolvable mal_id must return the local row id');
+        $this->assertSame([['field' => 'mal_id', 'value' => 12345]], $repo->byMetadataCalls);
+    }
+
+    public function testResolveMediaItemIdByMalIdReturnsNullForUnknownMalId(): void
+    {
+        $repo = new ItemRepository();
+        $repo->rows['m1'] = [
+            'id' => 'm1',
+            'name' => 'Test',
+            'type' => 'episode',
+            'path' => '/x.mkv',
+            'metadata' => ['mal_id' => 99999],
+        ];
+
+        $plugin = $this->makePlugin();
+        $this->setProp($plugin, 'itemRepository', $repo);
+
+        $this->assertNull($this->invoke($plugin, 'resolveMediaItemIdByMalId', 12345));
+    }
+
+    public function testResolveMediaItemIdByMalIdNullWithoutRepository(): void
+    {
+        $plugin = $this->makePlugin();
+
+        $this->assertNull($this->invoke($plugin, 'resolveMediaItemIdByMalId', 12345));
+    }
+
+    public function testResolveProbesTheHostHookBeforeCallingIt(): void
+    {
+        // findByMetadataField() exists on host master (phlix-server bfd4af98)
+        // but NOT in the released v1.2.x tags; calling it blind would fatal
+        // every watchlist tick on a current release host. The runtime
+        // method_exists() probe is load-bearing for the deploy matrix and the
+        // test process cannot simulate its absence (the typed stub mirrors
+        // the modern surface), so the guard is pinned by source scan —
+        // house idiom (cf. AniListMinorsW9Test accessor pin).
+        $src = (string) file_get_contents(dirname(__DIR__, 2) . '/src/AniListPlugin.php');
+
+        $this->assertMatchesRegularExpression(
+            '/method_exists\(\$this->itemRepository, \'findByMetadataField\'\)/',
+            $src,
+            'resolve must probe the optional host hook instead of trusting the type'
+        );
+    }
+
+    public function testUpdateWatchlistStatusWritesAuthoritativeFieldsOverExisting(): void
+    {
+        $repo = new ItemRepository();
+        $repo->rows['m1'] = [
+            'id' => 'm1',
+            'name' => 'Test',
+            'type' => 'episode',
+            'path' => '/x.mkv',
+            'metadata' => [
+                'mal_id' => 12345,
+                'anilist_id' => 7,
+                'anilist_status' => 'PAUSED',
+                'anilist_score' => 5,
+                'anilist_progress' => 3,
+                'tmdb_id' => 555,
+            ],
+        ];
+
+        $plugin = $this->makePlugin();
+        $this->setProp($plugin, 'itemRepository', $repo);
+
+        $this->invoke($plugin, 'updateWatchlistStatus', 12345, 99, 'COMPLETED', [
+            'score' => 9,
+            'progress' => 24,
+        ]);
+
+        $this->assertCount(1, $repo->updateCalls, 'the watchlist tick must persist now that resolution works');
+        $written = $repo->updateCalls[0]['data']['metadata_json'];
+        $this->assertSame('COMPLETED', $written['anilist_status'], 'status is authoritative, not gap-filled');
+        $this->assertSame(99, $written['anilist_id']);
+        $this->assertSame(9, $written['anilist_score']);
+        $this->assertSame(24, $written['anilist_progress']);
+        $this->assertSame(12345, $written['mal_id'], 'namespaces the tick does not write are preserved');
+        $this->assertSame(555, $written['tmdb_id'], 'foreign namespaces are never touched');
     }
 
     public function testSyncWatchlistFromAniListSkipsWhenApiNull(): void
@@ -375,13 +463,14 @@ final class AniListPluginOnEnableTest extends TestCase
         $plugin = $this->makePlugin();
         $this->setProp($plugin, 'itemRepository', $repo);
 
-        // Should not throw - resolves to null (Wave 2 gap)
+        // Should not throw - the mal_id resolves to no local row
         $this->invoke($plugin, 'updateWatchlistStatus', 12345, 99, 'CURRENT', [
             'score' => 85,
             'progress' => 5,
         ]);
 
-        // No update calls since resolveMediaItemIdByMalId always returns null
+        // No update calls: findByMetadataField('mal_id', 12345) matches nothing
+        // (the only row carries 99999)
         $this->assertCount(0, $repo->updateCalls);
     }
 

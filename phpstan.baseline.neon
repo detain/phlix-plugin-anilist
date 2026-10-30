@@ -86,10 +86,13 @@ parameters:
 			path: src/AniListPlugin.php
 
 		-
-			# Dead resolve stub (always returns null); implemented in the same
-			# majors wave (M-ANILIST-01), at which point this entry retires.
-			message: '#^Method Phlix\\Plugins\\Metadata\\AniList\\AniListPlugin\:\:resolveMediaItemIdByMalId\(\) never returns string so it can be removed from the return type\.$#'
-			identifier: return.unusedType
+			# The metadata lookup hook exists on host master (bfd4af98) but NOT
+			# in the released v1.2.x tags: the probe is deploy-matrix defense and
+			# the fallback debug-skip is live code on release hosts — phpstan
+			# analyses against the modern-surface mirror in tests/Stub/, so the
+			# probe "always" passes (same posture as the Timer::sleep entry).
+			message: '#^Call to function method_exists\(\) with Phlix\\Media\\Library\\ItemRepository and ''findByMetadataField'' will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
 			count: 1
 			path: src/AniListPlugin.php
 

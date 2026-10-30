@@ -67,10 +67,13 @@ if (!class_exists(\Phlix\Shared\Events\Playback\PlaybackStopped::class)) {
  * Recording spy for the host-supplied Phlix\Media\Library\ItemRepository.
  *
  * Mirrors the REAL host surface used by the plugin: findById() (returns a
- * hydrated row whose `metadata` key holds the decoded blob) and
- * update(string $id, array $data) — the actual persistence method. It
- * deliberately does NOT expose the non-existent updateMetadata() /
- * updateMetadataByExternalId() so that reintroducing those defects fails.
+ * hydrated row whose `metadata` key holds the decoded blob),
+ * findByMetadataField() (row lookup by a metadata key — host master
+ * bfd4af98; released v1.2.x hosts LACK it, which is why the plugin calls it
+ * behind a runtime method_exists() probe), and update(string $id, array
+ * $data) — the actual persistence method. It deliberately does NOT expose
+ * the non-existent updateMetadata() / updateMetadataByExternalId() so that
+ * reintroducing those defects fails.
  */
 if (!class_exists(\Phlix\Media\Library\ItemRepository::class)) {
     class ItemRepositoryStub
@@ -81,12 +84,34 @@ if (!class_exists(\Phlix\Media\Library\ItemRepository::class)) {
         /** @var list<array{id: string, data: array<string, mixed>}> */
         public array $updateCalls = [];
 
+        /** @var list<array{field: string, value: mixed}> */
+        public array $byMetadataCalls = [];
+
         /** @var list<string> IDs whose update() should throw (simulated fault). */
         public array $failIds = [];
 
         public function findById(string $id): ?array
         {
             return $this->rows[$id] ?? null;
+        }
+
+        /**
+         * @param mixed $value
+         *
+         * @return array<string, mixed>|null
+         */
+        public function findByMetadataField(string $field, $value): ?array
+        {
+            $this->byMetadataCalls[] = ['field' => $field, 'value' => $value];
+
+            foreach ($this->rows as $row) {
+                $metadata = is_array($row['metadata'] ?? null) ? $row['metadata'] : [];
+                if (array_key_exists($field, $metadata) && $metadata[$field] === $value) {
+                    return $row;
+                }
+            }
+
+            return null;
         }
 
         /**

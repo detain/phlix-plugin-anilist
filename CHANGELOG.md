@@ -18,6 +18,15 @@ ever resolvable through the dev channel (default-branch HEAD pin, version
 
 ### Fixed
 - Review-campaign majors batch W94 (estate `anilist` majors program):
+  - watchlist sync finally WRITES BACK: `resolveMediaItemIdByMalId()` was a
+    `return null` stub behind README/composer claims of status sync "back to
+    Phlix". It now maps entries through the host repository's
+    `findByMetadataField('mal_id', …)` (host master bfd4af98; a runtime
+    method_exists probe keeps pre-hook release hosts degrading to a logged
+    skip), and the watchlist's own AniList fields merge AUTHORITATIVELY —
+    the shared gap-fill path could never move a stored status, so a
+    CURRENT→COMPLETED tick silently no-oped even once resolvable
+    (M-ANILIST-01);
   - remote 4xx/5xx response bodies no longer ride unbounded into exception
     messages — and from there verbatim into server logs via every caller's
     `'error' => $e->getMessage()`; `HttpClient` now carries only a

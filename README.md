@@ -14,7 +14,11 @@ library with anime and manga metadata:
   and cover images via the AniList GraphQL API.
 - **Watchlist sync** — synchronizes your AniList status lists
   (CURRENT/COMPLETED/PLANNING/PAUSED/DROPPED; the rarely-used REPEATING status
-  is deliberately not synced) back to Phlix.
+  is deliberately not synced) back to Phlix: entries are mapped to local items
+  through the host repository's metadata lookup (`mal_id`), and the synced
+  AniList fields are written authoritatively for their own namespace. Release
+  hosts without the metadata lookup hook (pre-`bfd4af98`) skip the write-back
+  with a logged notice; enrichment and progress sync are unaffected.
 - **Episode progress** — tracks which episodes you've completed for series.
 - **Average score & favorites** — surfaces AniList scores and favourite status.
 

@@ -651,10 +651,15 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
      *
      * @param string $mediaItemId Media item UUID
      * @param array<string, mixed> $metadata New metadata to merge
+     * @param bool $incomingWins When true the incoming values are authoritative
+     *        and overwrite existing keys (watchlist ticks for their own
+     *        namespace); when false the merge is gap-fill, never clobbering a
+     *        value written by a higher-priority source (enrichment default).
+     *        Empty incoming values never clear in either mode.
      *
      * @return void
      */
-    private function updateMediaItemMetadata(string $mediaItemId, array $metadata): void
+    private function updateMediaItemMetadata(string $mediaItemId, array $metadata, bool $incomingWins = false): void
     {
         if ($this->itemRepository === null) {
             return;
@@ -669,10 +674,10 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
             // findById() hydrates the JSON blob into the `metadata` key.
             $existingMetadata = is_array($row['metadata'] ?? null) ? $row['metadata'] : [];
 
-            // Gap-fill merge: AniList only fills fields the item does not already
-            // have; it never clobbers an existing non-empty value written by a
-            // higher-priority source (TMDB/IMDb).
-            $mergedMetadata = $this->gapFillMerge($existingMetadata, $metadata);
+            // Merge under the caller's authority mode (gap-fill for enrichment,
+            // overwrite for the watchlist's own fields); foreign namespaces
+            // written by higher-priority sources (TMDB/IMDb) survive either way.
+            $mergedMetadata = $this->gapFillMerge($existingMetadata, $metadata, $incomingWins);
             if ($mergedMetadata === $existingMetadata) {
                 return; // nothing new to contribute
             }
@@ -692,15 +697,21 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
     }
 
     /**
-     * Merge new metadata into existing metadata WITHOUT clobbering existing
-     * non-empty values (gap-fill semantics).
+     * Merge new metadata into existing metadata.
+     *
+     * Gap-fill mode (default): never clobbers an existing non-empty value.
+     * Authoritative mode (`$incomingWins`): the caller's keys overwrite what is
+     * stored — used by watchlist ticks, whose AniList fields are the source of
+     * truth for their own namespace. Either way an EMPTY incoming value never
+     * contributes and never clears, and keys the merge does not carry survive.
      *
      * @param array<string, mixed> $existing Current metadata blob
      * @param array<string, mixed> $incoming Candidate values from AniList
+     * @param bool $incomingWins Overwrite existing keys with incoming values
      *
      * @return array<string, mixed> Merged metadata
      */
-    private function gapFillMerge(array $existing, array $incoming): array
+    private function gapFillMerge(array $existing, array $incoming, bool $incomingWins = false): array
     {
         $merged = $existing;
 
@@ -708,7 +719,11 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
             if ($this->isEmptyValue($value)) {
                 continue; // nothing to contribute
             }
-            if (array_key_exists($key, $existing) && !$this->isEmptyValue($existing[$key])) {
+            if (
+                $incomingWins === false
+                && array_key_exists($key, $existing)
+                && !$this->isEmptyValue($existing[$key])
+            ) {
                 continue; // preserve the existing (higher-priority) value
             }
             $merged[$key] = $value;
@@ -985,35 +1000,34 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
             // never be corrected by a later enrichment pass) — M-ANILIST-14.
         ];
 
-        // The host has no "find a local item by an arbitrary metadata field"
-        // method, so watchlist status cannot yet be mapped back to a local row.
-        // Route through the same real update() seam once an ID is resolvable —
-        // see resolveMediaItemIdByMalId() for the Wave 2 host-API gap.
+        // Map the entry back to a local row through the host metadata lookup
+        // (release-matrix notes in resolveMediaItemIdByMalId()).
         $mediaItemId = $this->resolveMediaItemIdByMalId($malId);
         if ($mediaItemId === null) {
             $this->logger?->debug(
-                'AniList: cannot map MAL id to a local media item; watchlist status skipped '
-                . '(needs a host lookup-by-metadata API — Wave 2)',
+                'AniList: no local item carries this MAL id (or the host lacks the '
+                . 'metadata lookup hook); watchlist status skipped',
                 ['mal_id' => $malId]
             );
             return;
         }
 
-        // Watchlist fields are authoritative for the AniList namespace, so write
-        // them straight through the same persistence path as enrichment.
-        $this->updateMediaItemMetadata($mediaItemId, $metadata);
+        // Watchlist fields are authoritative for the AniList namespace, so they
+        // OVERWRITE previously stored anilist_* values — the gap-fill mode used
+        // by enrichment could never move a stored status (M-ANILIST-01).
+        $this->updateMediaItemMetadata($mediaItemId, $metadata, true);
     }
 
     /**
      * Resolve a local media item ID from a MyAnimeList ID stored in the item's
      * metadata blob.
      *
-     * WAVE 2 GAP: the host {@see ItemRepository} exposes no
-     * find-by-metadata-field API (only findById/findByPath/findByIds/search),
-     * so there is currently no way to locate the row whose
-     * `metadata_json.mal_id` matches. Until the host provides one (e.g.
-     * `ItemRepository::findByMetadataField('mal_id', $value): ?array`) this
-     * returns null and the caller logs the skip — it never silently vanishes.
+     * Uses the host {@see ItemRepository::findByMetadataField()}, which exists
+     * on host master (phlix-server bfd4af98) but NOT in the released v1.2.x
+     * tags — hence the runtime probe: calling it blind would fatal every
+     * watchlist tick on a current release host. An old host degrades to the
+     * documented skip (logged, never silent); a modern host resolves exactly
+     * one row whose `metadata_json.mal_id` matches, or null for a genuine miss.
      *
      * @param int $malId MyAnimeList ID
      *
@@ -1021,7 +1035,27 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
      */
     private function resolveMediaItemIdByMalId(int $malId): ?string
     {
-        return null;
+        if ($this->itemRepository === null) {
+            return null;
+        }
+
+        if (method_exists($this->itemRepository, 'findByMetadataField') === false) {
+            $this->logger?->debug(
+                'AniList: host predates the metadata lookup hook; watchlist status skipped',
+                ['mal_id' => $malId]
+            );
+
+            return null;
+        }
+
+        $row = $this->itemRepository->findByMetadataField('mal_id', $malId);
+        if ($row === null) {
+            return null;
+        }
+
+        $id = $row['id'] ?? null;
+
+        return is_string($id) === true && $id !== '' ? $id : null;
     }
 
     /**
