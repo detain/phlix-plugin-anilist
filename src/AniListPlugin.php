@@ -62,6 +62,19 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
      */
     private const MAX_ENRICH_QUEUE = 5000;
 
+    /**
+     * Page size for one watchlist fetch (AniList's own perPage maximum).
+     */
+    private const SYNC_PAGE_SIZE = 50;
+
+    /**
+     * Backstop on the watchlist page walk: 100 pages x 50 = 5000 entries per
+     * status. Real AniList lists walk out well below this; the cap bounds the
+     * request budget of one sync tick against a flood-prone or pathological
+     * answer, and hitting it is LOUD (never a silent truncation).
+     */
+    private const MAX_SYNC_PAGES = 100;
+
     private ?ItemRepository $itemRepository = null;
     private ?LoggerInterface $logger = null;
     private ?AniListApi $api = null;
@@ -936,6 +949,12 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
     /**
      * Sync a specific status list from AniList.
      *
+     * The list is walked page by page ({@see self::SYNC_PAGE_SIZE} per fetch,
+     * stable MEDIA_ID order server-side) until a page comes back short — a
+     * single page-1 fetch silently truncated every watchlist beyond 50
+     * entries per status. The walk is capped at {@see self::MAX_SYNC_PAGES}
+     * pages and hitting the cap warns loudly.
+     *
      * @param string $username AniList username
      * @param string $status Status to sync
      *
@@ -943,12 +962,24 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
      */
     private function syncStatusList(string $username, string $status): void
     {
-        if ($this->api === null) {
+        $api = $this->api;
+        if ($api === null) {
             return;
         }
 
-        try {
-            $entries = $this->api->getUserAnimeList($username, $status, 1, 50);
+        for ($page = 1; $page <= self::MAX_SYNC_PAGES; $page++) {
+            try {
+                $entries = $api->getUserAnimeList($username, $status, $page, self::SYNC_PAGE_SIZE);
+            } catch (AniListApiException $e) {
+                $this->logger?->warning('AniList: failed to sync status list', [
+                    'username' => $username,
+                    'status' => $status,
+                    'page' => $page,
+                    'error' => $e->getMessage(),
+                ]);
+
+                return;
+            }
 
             foreach ($entries as $entry) {
                 $media = $entry['media'] ?? null;
@@ -964,13 +995,17 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
                 $anilistId = is_int($media['id'] ?? null) ? $media['id'] : null;
                 $this->updateWatchlistStatus($malId, $anilistId, $status, $entry);
             }
-        } catch (AniListApiException $e) {
-            $this->logger?->warning('AniList: failed to sync status list', [
-                'username' => $username,
-                'status' => $status,
-                'error' => $e->getMessage(),
-            ]);
+
+            if (count($entries) < self::SYNC_PAGE_SIZE) {
+                return; // short (or empty) page = end of this status's list
+            }
         }
+
+        $this->logger?->warning('AniList: status list hit the pagination cap; remainder not synced', [
+            'username' => $username,
+            'status' => $status,
+            'pages' => self::MAX_SYNC_PAGES,
+        ]);
     }
 
     /**

@@ -14,6 +14,8 @@
  * - M-ANILIST-04 (majors): a remote 4xx/5xx body may ride into an exception
  *   message — and from there verbatim into logs — only as a control-char
  *   stripped, newline-free, length-bounded excerpt.
+ * - M-ANILIST-05 (majors): watchlist status fetching walks every page under
+ *   a stable sort and a loud capped backstop, not just page 1 x 50.
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  * @license   MIT
@@ -23,9 +25,14 @@ declare(strict_types=1);
 
 namespace Phlix\Tests\Unit\Plugins\Metadata\AniList;
 
+use Phlix\Plugins\Metadata\AniList\AniListApi;
 use Phlix\Plugins\Metadata\AniList\AniListApiException;
+use Phlix\Plugins\Metadata\AniList\AniListPlugin;
+use Phlix\Plugins\Metadata\AniList\AniListSettings;
 use Phlix\Plugins\Metadata\AniList\HttpClient;
+use Phlix\Plugins\Metadata\AniList\HttpClientInterface;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\NullLogger;
 
 final class AniListMajorsW94Test extends TestCase
 {
@@ -148,6 +155,147 @@ final class AniListMajorsW94Test extends TestCase
         } catch (AniListApiException $e) {
             $this->assertStringContainsString('HTTP 404', $e->getMessage());
         }
+    }
+
+    // ------------------------------------------------ M-ANILIST-05 (majors) --
+
+    /**
+     * Build a plugin whose status fetch is served by canned pages.
+     *
+     * @param array<int, list<array<string, mixed>>> $pages page number => entries
+     * @return array{0: AniListPlugin, 1: object{pagesRequested: list<int>}}
+     */
+    private function pluginWithPages(array $pages, ?RecordingAniListLogger $logger = null): array
+    {
+        $http = new class ($pages) implements HttpClientInterface {
+            /** @var list<int> */
+            public array $pagesRequested = [];
+
+            /** @var list<string> */
+            public array $queries = [];
+
+            /**
+             * @param array<int, list<array<string, mixed>>> $pages
+             */
+            public function __construct(private array $pages)
+            {
+            }
+
+            public function post(string $url, array $data, array $headers = []): array
+            {
+                $page = (int) ($data['variables']['page'] ?? 0);
+                $this->pagesRequested[] = $page;
+                $this->queries[] = (string) ($data['query'] ?? '');
+
+                return ['data' => ['Page' => ['mediaList' => $this->pages[$page] ?? []]]];
+            }
+
+            public function get(string $url, array $params = [], array $headers = []): array
+            {
+                return [];
+            }
+        };
+
+        $settings = new AniListSettings(
+            accessToken: 'token',
+            username: 'testuser',
+            syncEnabled: true,
+        );
+        $api = new AniListApi($http, 'token', new NullLogger());
+        $ref = new \ReflectionClass(AniListPlugin::class);
+        /** @var AniListPlugin $plugin */
+        $plugin = $ref->newInstanceWithoutConstructor();
+        $p = new \ReflectionProperty($plugin, 'settings');
+        $p->setAccessible(true);
+        $p->setValue($plugin, $settings);
+        $p = new \ReflectionProperty($plugin, 'enabled');
+        $p->setAccessible(true);
+        $p->setValue($plugin, true);
+        $p = new \ReflectionProperty($plugin, 'api');
+        $p->setAccessible(true);
+        $p->setValue($plugin, $api);
+        $p = new \ReflectionProperty($plugin, 'logger');
+        $p->setAccessible(true);
+        $p->setValue($plugin, $logger ?? new NullLogger());
+
+        return [$plugin, $http];
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function fullPage(int $perPage): array
+    {
+        $entries = [];
+        for ($i = 0; $i < $perPage; $i++) {
+            $entries[] = ['media' => ['id' => $i, 'idMal' => 1000 + $i]];
+        }
+
+        return $entries;
+    }
+
+    public function testSyncStatusListWalksEveryPageUntilAShortPage(): void
+    {
+        // 50 entries on page 1 (= perPage, more may follow) and 2 on page 2
+        // (short page = end of list). The fetch must ask for exactly [1, 2].
+        [$plugin, $http] = $this->pluginWithPages([1 => $this->fullPage(50), 2 => $this->fullPage(2)]);
+
+        $m = new \ReflectionMethod($plugin, 'syncStatusList');
+        $m->setAccessible(true);
+        $m->invoke($plugin, 'testuser', 'CURRENT');
+
+        $this->assertSame([1, 2], $http->pagesRequested, 'a full page must be followed by the next page');
+    }
+
+    public function testSyncStatusListStopsAfterTheFirstEmptyPage(): void
+    {
+        [$plugin, $http] = $this->pluginWithPages([1 => $this->fullPage(50), 2 => $this->fullPage(50), 3 => []]);
+
+        $m = new \ReflectionMethod($plugin, 'syncStatusList');
+        $m->setAccessible(true);
+        $m->invoke($plugin, 'testuser', 'CURRENT');
+
+        $this->assertSame([1, 2, 3], $http->pagesRequested);
+    }
+
+    public function testSyncStatusListCapsPaginationAndWarnsLoudly(): void
+    {
+        $ref = new \ReflectionClass(AniListPlugin::class);
+        $cap = (int) $ref->getConstant('MAX_SYNC_PAGES');
+        $this->assertGreaterThan(0, $cap);
+
+        $pages = [];
+        for ($p = 1; $p <= $cap + 1; $p++) {
+            $pages[$p] = $this->fullPage(50);
+        }
+
+        $logger = new RecordingAniListLogger();
+        [$plugin, $http] = $this->pluginWithPages($pages, $logger);
+
+        $m = new \ReflectionMethod($plugin, 'syncStatusList');
+        $m->setAccessible(true);
+        $m->invoke($plugin, 'testuser', 'CURRENT');
+
+        $this->assertCount($cap, $http->pagesRequested, 'pagination must stop at the documented cap');
+        $this->assertTrue(
+            $logger->hasRecord('warning', 'pagination cap'),
+            'hitting the cap must be a loud, visible truncation — never a silent one'
+        );
+    }
+
+    public function testAnimeListQueryCarriesAStableSortForPaging(): void
+    {
+        // Unstable ordering across pages silently duplicates or drops entries
+        // while walking; the walk is only sound with a fixed order.
+        [$plugin, $http] = $this->pluginWithPages([1 => []]);
+
+        $m = new \ReflectionMethod($plugin, 'syncStatusList');
+        $m->setAccessible(true);
+        $m->invoke($plugin, 'testuser', 'CURRENT');
+
+        $this->assertCount(1, $http->queries);
+        $this->assertStringContainsString('mediaList(userName: $userName', $http->queries[0]);
+        $this->assertStringContainsString('sort: [MEDIA_ID]', $http->queries[0]);
     }
 
     /**

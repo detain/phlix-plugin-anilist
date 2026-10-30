@@ -18,6 +18,13 @@ ever resolvable through the dev channel (default-branch HEAD pin, version
 
 ### Fixed
 - Review-campaign majors batch W94 (estate `anilist` majors program):
+  - watchlist sync now walks PAGES: `syncStatusList()` fetched exactly
+    page 1 × 50 per status, silently truncating every watchlist beyond 50
+    entries; it iterates until a short page under a stable server-side
+    `sort: [MEDIA_ID]` (added to the anime list query — the page-stitching
+    walk is unsound without a fixed order) with a 100-page backstop whose
+    breach is a loud warning, and a mid-walk API failure keeps the per-list
+    warning while preserving the pages already synced (M-ANILIST-05);
   - watchlist sync finally WRITES BACK: `resolveMediaItemIdByMalId()` was a
     `return null` stub behind README/composer claims of status sync "back to
     Phlix". It now maps entries through the host repository's

@@ -427,6 +427,10 @@ class AniListApi
     /**
      * Get a user's anime list with status filtering.
      *
+     * The one page fetched per call is sorted by MEDIA_ID: the watchlist walk
+     * in {@see AniListPlugin::syncStatusList()} stitches pages together, and
+     * page boundaries are only sound under a fixed order.
+     *
      * @param string $username AniList username
      * @param string|null $status Filter by status (CURRENT, COMPLETED, PLANNING, PAUSED, DROPPED)
      * @param int $page Page number
@@ -453,7 +457,7 @@ class AniListApi
         $query = <<<GRAPHQL
         query GetUserAnimeList(\$userName: String, \$status: MediaListStatus, \$page: Int, \$perPage: Int) {
             Page(page: \$page, perPage: \$perPage) {
-                mediaList(userName: \$userName, {$typeFilter}) {
+                mediaList(userName: \$userName, {$typeFilter}, sort: [MEDIA_ID]) {
                     id
                     status
                     score
