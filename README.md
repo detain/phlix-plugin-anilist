@@ -23,7 +23,10 @@ library with anime and manga metadata:
 - **Average score & favorites** — surfaces AniList scores and favourite status.
 
 It subscribes to `phlix.library.item.added` (throttled background enrichment)
-and `phlix.playback.stopped` (episode progress sync).
+and `phlix.playback.stopped` (episode progress sync). Every feature — the
+metadata lookups included — runs only when the plugin is enabled AND both the
+access token and the AniList username are configured (one shared gate; see
+Settings below).
 
 ## Install
 
@@ -46,8 +49,8 @@ Configure these in the Phlix admin **Plugins → Configure** dialog.
 | Setting | Type | Tier | Required | Default | Description |
 |---|---|---|---|---|---|
 | `enabled` | bool | standard | no | `false` | Master on/off for AniList sync/matching. |
-| `access_token` | string (secret) | standard | no | — | Personal AniList API access token, pasted in by hand. Create one at [anilist.co/settings/developer](https://anilist.co/settings/developer). Phlix does **not** run an AniList OAuth flow. Required for list sync and writing progress back. |
-| `username` | string | standard | no | — | Your AniList username, used to pull your lists during sync. |
+| `access_token` | string (secret) | standard | no | — | Personal AniList API access token, pasted in by hand. Create one at [anilist.co/settings/developer](https://anilist.co/settings/developer). Phlix does **not** run an AniList OAuth flow. Required for **every** AniList feature — enrichment, watchlist sync, and progress write-back all sit behind one configured-gate that demands token and username together. |
+| `username` | string | standard | no | — | Your AniList username. Required by the same gate as the token (the plugin refuses all work without it); the lists it pulls during sync are addressed by it. |
 | `sync_enabled` | bool | advanced | no | `true` | Sync watched/progress with your AniList list. |
 | `sync_interval_minutes` | int | advanced | no | `60` | How often to sync with AniList. |
 | `auto_match` | bool | advanced | no | `true` | Auto-match anime to AniList entries using external IDs. |

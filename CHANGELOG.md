@@ -18,6 +18,13 @@ ever resolvable through the dev channel (default-branch HEAD pin, version
 
 ### Fixed
 - Review-campaign majors batch W94 (estate `anilist` majors program):
+  - requirements scoping in README and `plugin.json` told users the token
+    was "required for list sync" and the username merely "used to pull your
+    lists": the configured-gate (`isConfigured()`: token AND username, on
+    top of `enabled`) actually refuses EVERY feature — enrichment included —
+    so both settings' docs and a new Overview sentence now state the shared
+    gate truthfully; the gate itself deliberately stays as strict as the
+    code has it (M-ANILIST-02);
   - the enrichment drain can no longer strand its queue: the one-shot timer
     callback ran `drainOne()` unguarded, so any item-level fault (a host
     read error was enough) escaped after the timer was already spent — no

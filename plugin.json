@@ -24,7 +24,7 @@
             "required": false,
             "tier": "standard",
             "label": "Access Token",
-            "description": "Paste a personal AniList API access token. Create one on the AniList developer settings page and paste it here — Phlix does not run an AniList OAuth flow. Required for list sync and writing progress back to AniList.",
+            "description": "Paste a personal AniList API access token. Create one on the AniList developer settings page and paste it here — Phlix does not run an AniList OAuth flow. Required for every AniList feature: metadata enrichment, watchlist sync, and progress write-back all sit behind one configured-gate that demands this token and the username together.",
             "link": "https://anilist.co/settings/developer",
             "link_text": "AniList developer settings"
         },
@@ -34,7 +34,7 @@
             "required": false,
             "tier": "standard",
             "label": "AniList Username",
-            "description": "Your AniList username. Used to pull your watch/read lists during sync."
+            "description": "Your AniList username. Part of the plugin's configured-gate alongside the access token: nothing runs (enrichment included) until both are set. It addresses the watch/read lists pulled during sync."
         },
         "sync_enabled": {
             "type": "boolean",
