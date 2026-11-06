@@ -15,7 +15,13 @@ require_once __DIR__ . '/../vendor/autoload.php';
 /**
  * Stub for host-supplied Phlix\Media\Library\MediaItem class.
  *
- * Mirrors the pattern used in AniListApiTest for MediaItemStub.
+ * Genuinely host-only: class_exists() is FALSE against the composer
+ * autoloader (probe verified at this commit), so the branch is live and the
+ * stub must stay. Note the boundary: host event classes that DO ship in
+ * vendor/detain/phlix-shared (PlaybackStopped, MediaItemAdded) must NOT get
+ * stub branches here — class_exists() is already true for them, and a stub
+ * for a shipped class is dead code that misleads readers into thinking the
+ * class is host-only.
  */
 if (!class_exists(\Phlix\Media\Library\MediaItem::class)) {
     final class MediaItemStubForAniList
@@ -44,23 +50,6 @@ if (!class_exists(\Phlix\Media\Library\MediaItem::class)) {
     }
 
     class_alias(MediaItemStubForAniList::class, \Phlix\Media\Library\MediaItem::class);
-}
-
-/**
- * Stub for host-supplied Phlix\Shared\Events\Playback\PlaybackStopped event.
- */
-if (!class_exists(\Phlix\Shared\Events\Playback\PlaybackStopped::class)) {
-    final class PlaybackStoppedStub
-    {
-        public function __construct(
-            public string $mediaItemId,
-            public bool $reachedEnd,
-            public int $position,
-        ) {
-        }
-    }
-
-    class_alias(PlaybackStoppedStub::class, \Phlix\Shared\Events\Playback\PlaybackStopped::class);
 }
 
 /**

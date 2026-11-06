@@ -17,6 +17,44 @@ ever resolvable through the dev channel (default-branch HEAD pin, version
 ## [Unreleased] — 0.4.x development line
 
 ### Fixed
+- Review-campaign minors/info batch W03-L10 (estate lane `w03L10`, register
+  `plugin-anilist__srphp.md`; items PG-037…PG-042):
+  - the periodic sync timer is documented honestly as PER-WORKER: the host
+    forks ~14 resident workers and `onEnable()` arms the timer in every one,
+    so the aggregate sync rate is the worker count times the configured
+    interval — N full page walks per tick against AniList's ~90 req/min
+    budget. The class header, `schedulePeriodicSync()`, the `onEnable()` arm
+    site and the README `sync_interval_minutes` row now all say so; electing
+    a single designated syncer would need a host-side coordination seam this
+    plugin does not have (PG-037);
+  - `formatGraphQLErrors()` no longer lets `json_encode()`'s `false` implode
+    an unserializable remote message (e.g. INF from a `1e999` literal) into
+    EMPTY prose while `@return string` promised text; the segment now reads
+    `(unserializable)`, pinned by a new regression test (PG-038);
+  - `getUserMangaList()` carries `sort: [MEDIA_ID]` exactly like its anime
+    twin: M-ANILIST-05 proved page-stitching is unsound without a fixed
+    order, and the public manga twin handed any paging host consumer the
+    same duplicate/drop hazard; pinned by a query-shape test (PG-039);
+  - `AniListSettings::toArray()`'s docblock stops writing as if an in-repo
+    path performed the persistence round-trip: the `$includeSecret: true`
+    shape exists solely for the HOST settings-persistence contract — no
+    caller inside this plugin passes it, and the tests exercise the branch
+    directly (PG-040);
+  - `AniListPlugin::$logger` is declared non-nullable — the constructor
+    already guarantees a `NullLogger` fallback, so 23 nullsafe call sites
+    collapse to plain arrows and the dead `?? new NullLogger()` in
+    `ensureApi()` is gone; the property stays reassignable (not `readonly`)
+    because `onEnable()` may still adopt the host logger (PG-041);
+  - `tests/bootstrap.php` drops the dead `PlaybackStopped` stub branch: the
+    class ships in `vendor/detain/phlix-shared` (`class_exists()` true at
+    runtime), so the alias never fired and the tests already build the real
+    6-argument event. The genuinely host-only `MediaItem` branch stays and
+    now documents that boundary (a stub for a shipped class is misleading
+    dead code); its stale cross-reference to an `AniListApiTest`
+    `MediaItemStub` that does not exist was corrected in the same pass
+    (PG-042, register premise partially stale — the second "dead branch" it
+    counted, `MediaItemAdded`, has no stub in this file in ANY revision).
+
 - Review-campaign majors batch W94 (estate `anilist` majors program):
   - requirements scoping in README and `plugin.json` told users the token
     was "required for list sync" and the username merely "used to pull your

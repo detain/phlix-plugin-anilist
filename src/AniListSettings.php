@@ -84,11 +84,13 @@ final class AniListSettings
      *
      * The bearer token is OMITTED by default (M-ANILIST-11): this general
      * shape is what callers log, diff and hand to generic serializers, and a
-     * secret must not ride along unasked. Only the host settings persistence
-     * round-trip needs the full shape — it passes `$includeSecret: true`.
-     * Wire/UI projection remains {@see toSpaArray()}.
+     * secret must not ride along unasked. The `$includeSecret: true` shape
+     * exists solely for the HOST settings persistence round-trip (writing
+     * `plugins.settings_json` back): no caller inside this plugin passes it,
+     * and the tests exercise the branch directly to pin the wire shape the
+     * host contract requires. Wire/UI projection remains {@see toSpaArray()}.
      *
-     * @param bool $includeSecret Include the raw access_token (persistence only)
+     * @param bool $includeSecret Include the raw access_token (host persistence contract only)
      *
      * @return array<string, mixed>
      */

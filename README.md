@@ -52,7 +52,7 @@ Configure these in the Phlix admin **Plugins → Configure** dialog.
 | `access_token` | string (secret) | standard | no | — | Personal AniList API access token, pasted in by hand. Create one at [anilist.co/settings/developer](https://anilist.co/settings/developer). Phlix does **not** run an AniList OAuth flow. Required for **every** AniList feature — enrichment, watchlist sync, and progress write-back all sit behind one configured-gate that demands token and username together. |
 | `username` | string | standard | no | — | Your AniList username. Required by the same gate as the token (the plugin refuses all work without it); the lists it pulls during sync are addressed by it. |
 | `sync_enabled` | bool | advanced | no | `true` | Sync watched/progress with your AniList list. |
-| `sync_interval_minutes` | int | advanced | no | `60` | How often to sync with AniList. |
+| `sync_interval_minutes` | int | advanced | no | `60` | How often to sync with AniList — **per worker process**. The host runs a pool of resident workers (~14) and each arms its own sync timer, so an interval of 60 minutes dials AniList roughly every 60/N minutes server-wide, with N full watchlist page-walks per tick. There is no single-designated-syncer coordination inside the plugin. |
 | `auto_match` | bool | advanced | no | `true` | Auto-match anime to AniList entries using external IDs. |
 
 ## Development

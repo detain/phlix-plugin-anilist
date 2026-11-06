@@ -101,9 +101,19 @@ class AniListApi
         $messages = [];
         foreach ($errors as $error) {
             if (is_array($error) === true && isset($error['message'])) {
-                $messages[] = is_string($error['message']) === true
-                    ? $error['message']
-                    : json_encode($error['message']);
+                if (is_string($error['message']) === true) {
+                    $messages[] = $error['message'];
+
+                    continue;
+                }
+
+                // json_encode() is string|false. A remote-controlled
+                // non-string message that cannot be serialized (INF from a
+                // `1e999` literal, for instance) used to implode toward empty
+                // prose while @return string promised text; name the failure
+                // in the message instead of hiding it.
+                $encoded = json_encode($error['message']);
+                $messages[] = is_string($encoded) === true ? $encoded : '(unserializable)';
             }
         }
 
@@ -496,6 +506,11 @@ class AniListApi
      * Retained as public client API (host/plugin consumers); not internal
      * dead code.
      *
+     * The one page fetched per call is sorted by MEDIA_ID, mirroring
+     * {@see self::getUserAnimeList()}: a host consumer that stitches pages
+     * of this list inherits the same fixed-order requirement, and paging
+     * without it silently duplicates or drops entries.
+     *
      * @param string $username AniList username
      * @param string|null $status Filter by status (CURRENT, COMPLETED, PLANNING, PAUSED, DROPPED)
      * @param int $page Page number
@@ -522,7 +537,7 @@ class AniListApi
         $query = <<<GRAPHQL
         query GetUserMangaList(\$userName: String, \$status: MediaListStatus, \$page: Int, \$perPage: Int) {
             Page(page: \$page, perPage: \$perPage) {
-                mediaList(userName: \$userName, {$typeFilter}) {
+                mediaList(userName: \$userName, {$typeFilter}, sort: [MEDIA_ID]) {
                     id
                     status
                     score

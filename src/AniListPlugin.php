@@ -36,6 +36,17 @@ use Psr\Log\NullLogger;
  * AniList's ~90 req/min budget. All network I/O flows through the non-blocking
  * {@see HttpClient}.
  *
+ * Timers are process-local, and that is load-bearing for sizing: the host
+ * forks a pool of resident Workerman workers (~14) and {@see onEnable()}
+ * runs in EVERY one of them, so each worker arms its own periodic sync
+ * timer. The `sync_interval_minutes` setting is therefore a PER-WORKER
+ * interval, not a server-global one — with N workers every tick performs N
+ * full five-status page walks (up to {@see self::MAX_SYNC_PAGES} pages per
+ * status each), multiplying the request pressure on AniList's ~90 req/min
+ * budget by the worker count. This plugin has no cross-process coordination
+ * seam (a designated syncer would need host support); the multiplication is
+ * documented honestly rather than discovered in a rate-limit incident.
+ *
  * @package Phlix\Plugins\Metadata\AniList
  */
 final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
@@ -76,7 +87,15 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
     private const MAX_SYNC_PAGES = 100;
 
     private ?ItemRepository $itemRepository = null;
-    private ?LoggerInterface $logger = null;
+
+    /**
+     * Never null after construction: the constructor falls back to a
+     * NullLogger, so call sites take a plain arrow rather than nullsafe
+     * noise. Reassignable (not readonly) — onEnable() may adopt the host
+     * logger from the container when the caller injected none.
+     */
+    private LoggerInterface $logger;
+
     private ?AniListApi $api = null;
 
     /**
@@ -159,12 +178,15 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
             $this->itemRepository = $itemRepo instanceof ItemRepository ? $itemRepo : null;
         } catch (\Throwable $e) {
             // Never let a container miss take down worker boot.
-            $this->logger?->warning('AniList: onEnable wiring failed', [
+            $this->logger->warning('AniList: onEnable wiring failed', [
                 'error' => $e->getMessage(),
             ]);
         }
 
         // Arming a Workerman timer is non-blocking; the sync callback connects lazily.
+        // NOTE: this whole method runs inside EVERY forked worker, so each
+        // worker arms its own periodic sync timer below — the interval is
+        // per-worker, not server-global (see schedulePeriodicSync()).
         if ($this->settings->syncEnabled) {
             $this->schedulePeriodicSync();
         }
@@ -229,7 +251,7 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
     private function enqueueForEnrichment(string $mediaItemId): void
     {
         if (count($this->enrichQueue) >= self::MAX_ENRICH_QUEUE) {
-            $this->logger?->warning('AniList: enrichment queue full, dropping item', [
+            $this->logger->warning('AniList: enrichment queue full, dropping item', [
                 'media_item_id' => $mediaItemId,
                 'queue_size' => count($this->enrichQueue),
             ]);
@@ -265,7 +287,7 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
             // Timer unavailable (not inside a Workerman worker). Leave the items
             // queued rather than draining inline; events are only dispatched in
             // resident workers where the timer is available.
-            $this->logger?->debug('AniList: enrichment timer unavailable, deferring drain');
+            $this->logger->debug('AniList: enrichment timer unavailable, deferring drain');
         }
     }
 
@@ -289,7 +311,7 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
         try {
             $this->drainOne();
         } catch (\Throwable $e) {
-            $this->logger?->warning('AniList: enrichment drain tick failed', [
+            $this->logger->warning('AniList: enrichment drain tick failed', [
                 'error' => $e->getMessage(),
                 'queue_size' => count($this->enrichQueue),
             ]);
@@ -357,7 +379,7 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
 
         $anilistId = $mediaItem->metadata['anilist_id'] ?? null;
         if (is_int($anilistId) === false) {
-            $this->logger?->debug('AniList: no anilist_id on media item, skipping progress sync', [
+            $this->logger->debug('AniList: no anilist_id on media item, skipping progress sync', [
                 'media_item_id' => $event->mediaItemId,
             ]);
             return;
@@ -382,7 +404,7 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
 
         $externalId = $this->findExternalId($mediaItem);
         if ($externalId === null) {
-            $this->logger?->debug('AniList: no external ID found for media item', [
+            $this->logger->debug('AniList: no external ID found for media item', [
                 'media_item_id' => $mediaItemId,
                 'name' => $mediaItem->name,
             ]);
@@ -391,7 +413,7 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
 
         $anilistEntry = $this->lookupAniListEntry($externalId);
         if ($anilistEntry === null) {
-            $this->logger?->debug('AniList: no entry found for external ID', [
+            $this->logger->debug('AniList: no entry found for external ID', [
                 'media_item_id' => $mediaItemId,
                 'external_id' => $externalId,
             ]);
@@ -401,7 +423,7 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
         $metadata = $this->buildMetadataFromEntry($anilistEntry);
         $this->updateMediaItemMetadata($mediaItemId, $metadata);
 
-        $this->logger?->info('AniList: enriched media item', [
+        $this->logger->info('AniList: enriched media item', [
             'media_item_id' => $mediaItemId,
             'anilist_id' => $anilistEntry['id'] ?? null,
             'title' => $anilistEntry['title']['romaji'] ?? 'unknown',
@@ -454,7 +476,7 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
 
             return $entry;
         } catch (AniListApiException $e) {
-            $this->logger?->warning('AniList: failed to look up entry by MAL ID', [
+            $this->logger->warning('AniList: failed to look up entry by MAL ID', [
                 'mal_id' => $externalId,
                 'error' => $e->getMessage(),
             ]);
@@ -654,7 +676,7 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
         }
 
         if ($value !== null) {
-            $this->logger?->debug('AniList: rejecting malformed date field', ['field' => $field]);
+            $this->logger->debug('AniList: rejecting malformed date field', ['field' => $field]);
         }
 
         return null;
@@ -682,7 +704,7 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
         }
 
         if ($value !== null) {
-            $this->logger?->debug('AniList: rejecting malformed nextAiringEpisode payload');
+            $this->logger->debug('AniList: rejecting malformed nextAiringEpisode payload');
         }
 
         return null;
@@ -731,7 +753,7 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
         } catch (\Throwable $e) {
             // Now that the write actually reaches the DB, a failure is a real
             // fault — surface it at error level rather than swallowing it.
-            $this->logger?->error('AniList: failed to persist media item metadata', [
+            $this->logger->error('AniList: failed to persist media item metadata', [
                 'media_item_id' => $mediaItemId,
                 'error' => $e->getMessage(),
             ]);
@@ -812,14 +834,14 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
             $savedProgress = $this->api->getMediaListProgress($anilistId);
         } catch (AniListApiException $e) {
             $savedProgress = null;
-            $this->logger?->debug('AniList: progress probe failed; writing without the monotonic check', [
+            $this->logger->debug('AniList: progress probe failed; writing without the monotonic check', [
                 'anilist_id' => $anilistId,
                 'error' => $e->getMessage(),
             ]);
         }
 
         if ($savedProgress !== null && $episodeNumber <= $savedProgress) {
-            $this->logger?->info('AniList: local progress is not newer than saved; skipping write', [
+            $this->logger->info('AniList: local progress is not newer than saved; skipping write', [
                 'anilist_id' => $anilistId,
                 'episode' => $episodeNumber,
                 'saved_progress' => $savedProgress,
@@ -831,13 +853,13 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
         try {
             $result = $this->api->saveEpisodeProgress($anilistId, $episodeNumber);
 
-            $this->logger?->info('AniList: synced episode progress', [
+            $this->logger->info('AniList: synced episode progress', [
                 'anilist_id' => $anilistId,
                 'episode' => $episodeNumber,
                 'result' => $result,
             ]);
         } catch (AniListApiException $e) {
-            $this->logger?->warning('AniList: failed to sync episode progress', [
+            $this->logger->warning('AniList: failed to sync episode progress', [
                 'anilist_id' => $anilistId,
                 'episode' => $episodeNumber,
                 'error' => $e->getMessage(),
@@ -879,7 +901,7 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
         $this->api = new AniListApi(
             new HttpClient($this->logger),
             $accessToken,
-            $this->logger ?? new NullLogger()
+            $this->logger
         );
     }
 
@@ -907,6 +929,14 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
      *
      * Takes no arguments: collaborators were moved to {@see onEnable()} long
      * ago and the timer interval is resolved by {@see syncIntervalSeconds()}.
+     *
+     * HONEST SCOPE: one repeating timer per worker process. The host forks a
+     * pool of resident Workerman workers and onEnable() executes in every
+     * one of them, so the aggregate sync RATE is the worker count times the
+     * configured interval's rate, and each tick performs its own full page
+     * walk. No seam available to this plugin elects a single designated
+     * syncer (a host-side lock or scheduler would be required); the
+     * multiplication stands as documented behavior.
      */
     private function schedulePeriodicSync(): void
     {
@@ -939,7 +969,7 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
         try {
             $this->syncWatchlistFromAniList();
         } catch (\Throwable $e) {
-            $this->logger?->warning('AniList periodic sync failed', [
+            $this->logger->warning('AniList periodic sync failed', [
                 'error' => $e->getMessage(),
             ]);
         }
@@ -961,7 +991,7 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
             return;
         }
 
-        $this->logger?->info('AniList: starting watchlist sync', [
+        $this->logger->info('AniList: starting watchlist sync', [
             'username' => $username,
         ]);
 
@@ -970,7 +1000,7 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
             $this->syncStatusList($username, $status);
         }
 
-        $this->logger?->info('AniList: watchlist sync completed', [
+        $this->logger->info('AniList: watchlist sync completed', [
             'username' => $username,
         ]);
     }
@@ -1000,7 +1030,7 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
             try {
                 $entries = $api->getUserAnimeList($username, $status, $page, self::SYNC_PAGE_SIZE);
             } catch (AniListApiException $e) {
-                $this->logger?->warning('AniList: failed to sync status list', [
+                $this->logger->warning('AniList: failed to sync status list', [
                     'username' => $username,
                     'status' => $status,
                     'page' => $page,
@@ -1030,7 +1060,7 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
             }
         }
 
-        $this->logger?->warning('AniList: status list hit the pagination cap; remainder not synced', [
+        $this->logger->warning('AniList: status list hit the pagination cap; remainder not synced', [
             'username' => $username,
             'status' => $status,
             'pages' => self::MAX_SYNC_PAGES,
@@ -1068,7 +1098,7 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
         // (release-matrix notes in resolveMediaItemIdByMalId()).
         $mediaItemId = $this->resolveMediaItemIdByMalId($malId);
         if ($mediaItemId === null) {
-            $this->logger?->debug(
+            $this->logger->debug(
                 'AniList: no local item carries this MAL id (or the host lacks the '
                 . 'metadata lookup hook); watchlist status skipped',
                 ['mal_id' => $malId]
@@ -1104,7 +1134,7 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
         }
 
         if (method_exists($this->itemRepository, 'findByMetadataField') === false) {
-            $this->logger?->debug(
+            $this->logger->debug(
                 'AniList: host predates the metadata lookup hook; watchlist status skipped',
                 ['mal_id' => $malId]
             );

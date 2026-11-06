@@ -410,6 +410,42 @@ final class AniListApiTest extends TestCase
 
         $api->getMediaById(1);
     }
+
+    public function testFormatGraphQLErrorsNamesAnUnserializableMessage(): void
+    {
+        // json_encode() is string|false. A remote-controlled non-string
+        // message that cannot be serialized (json_decode('1e999') yields
+        // INF, which json_encode refuses) used to implode toward an EMPTY
+        // message while @return string promised prose; the segment must say
+        // so instead of vanishing.
+        $http = new MockHttpClient([[
+            'errors' => [
+                ['message' => json_decode('1e999')],
+            ],
+        ]]);
+        $api = new AniListApi($http, self::ACCESS_TOKEN, new NullLogger());
+
+        $this->expectException(AniListApiException::class);
+        $this->expectExceptionMessage('(unserializable)');
+
+        $api->getMediaById(1);
+    }
+
+    public function testUserMangaListQueryCarriesAStableSortForPaging(): void
+    {
+        // M-ANILIST-05 added sort: [MEDIA_ID] to the anime twin because
+        // page-stitching is unsound without a fixed order; the public manga
+        // twin inherits exactly the same reorder/truncation hazard for any
+        // host consumer that pages it.
+        $http = new MockHttpClient([['data' => ['Page' => ['mediaList' => []]]]]);
+        $api = new AniListApi($http, self::ACCESS_TOKEN, new NullLogger());
+
+        $api->getUserMangaList('testuser');
+
+        $query = (string) ($http->lastData['query'] ?? '');
+        $this->assertStringContainsString('mediaList(userName: $userName', $query);
+        $this->assertStringContainsString('sort: [MEDIA_ID]', $query);
+    }
 }
 
 /**
