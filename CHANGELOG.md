@@ -17,6 +17,38 @@ ever resolvable through the dev channel (default-branch HEAD pin, version
 ## [Unreleased] — 0.4.x development line
 
 ### Fixed
+- Review-campaign copy batch W05-L5 (estate lane `w05L5`, register
+  `plugin-anilist__copywriter.md`; items PG-049…PG-054) — README/`plugin.json`
+  copy truth, code untouched:
+  - the bare `bfd4af98` hash in the README now names its repository
+    (pre-`phlix-server bfd4af98`), matching the in-product phrasing at
+    `resolveMediaItemIdByMalId()` — the hash lives in phlix-server history and
+    an admin reading this repo alone could not resolve it (PG-049);
+  - "using external IDs" (both `auto_match` surfaces) overstated the key set:
+    `findExternalId()` reads only the `mal_id` metadata key
+    (`src/AniListPlugin.php:440-447`), so both now say "the item's
+    MyAnimeList id (mal_id)" — the same honesty the code docblock gained in
+    the minors wave (PG-050);
+  - "Sync watched/progress" slash-jargon expanded to "Sync your watched
+    status and episode progress" on the `sync_enabled` settings surfaces, and
+    the README episode-progress bullet gained its missing determiner
+    ("for each series") (PG-051);
+  - the invented term "configured-gate" (and README's rival label "one shared
+    gate") replaced everywhere with one plain formulation: every AniList
+    feature requires the token AND the username
+    (`AniListSettings::isConfigured()` at `src/AniListSettings.php:147-150`,
+    enforced at every gate site). The Overview sentence also stopped claiming
+    the master toggle gates EVERY feature — it gates the event-driven paths
+    (`AniListPlugin.php:232/:354` via `isConfigured()` at :875-877), while the
+    host-armed periodic sync checks only token+username+`sync_enabled`
+    (:943/:963) — and the README settings table now carries the sibling
+    (trakt) column set: Setting|Type|Required|Secret|Tier|Default|Description,
+    secretness in its own column instead of "string (secret)" (PG-052, PG-054);
+  - the `access_token` tooltip trimmed to the paste instruction plus the
+    linked developer-settings page; the joint token-and-username gate is now
+    stated once, under `username`, instead of duplicated verbatim-in-substance
+    on both rows (PG-053).
+
 - Review-campaign minors/info batch W03-L10 (estate lane `w03L10`, register
   `plugin-anilist__srphp.md`; items PG-037…PG-042):
   - the periodic sync timer is documented honestly as PER-WORKER: the host

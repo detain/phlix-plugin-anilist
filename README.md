@@ -17,16 +17,17 @@ library with anime and manga metadata:
   is deliberately not synced) back to Phlix: entries are mapped to local items
   through the host repository's metadata lookup (`mal_id`), and the synced
   AniList fields are written authoritatively for their own namespace. Release
-  hosts without the metadata lookup hook (pre-`bfd4af98`) skip the write-back
-  with a logged notice; enrichment and progress sync are unaffected.
-- **Episode progress** — tracks which episodes you've completed for series.
+  hosts without the metadata lookup hook (pre-`phlix-server bfd4af98`) skip the
+  write-back with a logged notice; enrichment and progress sync are unaffected.
+- **Episode progress** — tracks which episodes you've completed for each series.
 - **Average score & favorites** — surfaces AniList scores and favourite status.
 
 It subscribes to `phlix.library.item.added` (throttled background enrichment)
-and `phlix.playback.stopped` (episode progress sync). Every feature — the
-metadata lookups included — runs only when the plugin is enabled AND both the
-access token and the AniList username are configured (one shared gate; see
-Settings below).
+and `phlix.playback.stopped` (episode progress sync). Every AniList feature —
+the metadata lookups included — requires both the access token and the AniList
+username to be configured: with either one missing, nothing runs (see Settings
+below). The master toggle gates the event-driven features (enrichment and
+progress write-back); the periodic list sync is armed by the host without it.
 
 ## Install
 
@@ -46,14 +47,14 @@ php bin/phlix plugin:install https://github.com/detain/phlix-plugin-anilist
 
 Configure these in the Phlix admin **Plugins → Configure** dialog.
 
-| Setting | Type | Tier | Required | Default | Description |
-|---|---|---|---|---|---|
-| `enabled` | bool | standard | no | `false` | Master on/off for AniList sync/matching. |
-| `access_token` | string (secret) | standard | no | — | Personal AniList API access token, pasted in by hand. Create one at [anilist.co/settings/developer](https://anilist.co/settings/developer). Phlix does **not** run an AniList OAuth flow. Required for **every** AniList feature — enrichment, watchlist sync, and progress write-back all sit behind one configured-gate that demands token and username together. |
-| `username` | string | standard | no | — | Your AniList username. Required by the same gate as the token (the plugin refuses all work without it); the lists it pulls during sync are addressed by it. |
-| `sync_enabled` | bool | advanced | no | `true` | Sync watched/progress with your AniList list. |
-| `sync_interval_minutes` | int | advanced | no | `60` | How often to sync with AniList — **per worker process**. The host runs a pool of resident workers (~14) and each arms its own sync timer, so an interval of 60 minutes dials AniList roughly every 60/N minutes server-wide, with N full watchlist page-walks per tick. There is no single-designated-syncer coordination inside the plugin. |
-| `auto_match` | bool | advanced | no | `true` | Auto-match anime to AniList entries using external IDs. |
+| Setting | Type | Required | Secret | Tier | Default | Description |
+|---|---|---|---|---|---|---|
+| `enabled` | boolean | No | No | `standard` | `false` | Master on/off for AniList sync/matching. |
+| `access_token` | string | No | Yes | `standard` | `null` | Personal AniList API access token, pasted in by hand. Create one at [anilist.co/settings/developer](https://anilist.co/settings/developer). Phlix does **not** run an AniList OAuth flow. |
+| `username` | string | No | No | `standard` | `""` | Your AniList username. Every AniList feature requires it together with the access token: nothing runs (enrichment included) until both are set. The lists it pulls during sync are addressed by it. |
+| `sync_enabled` | boolean | No | No | `advanced` | `true` | Sync your watched status and episode progress with your AniList list. |
+| `sync_interval_minutes` | integer | No | No | `advanced` | `60` | How often to sync with AniList — **per worker process**. The host runs a pool of resident workers (~14) and each arms its own sync timer, so an interval of 60 minutes dials AniList roughly every 60/N minutes server-wide, with N full watchlist page-walks per tick. There is no single-designated-syncer coordination inside the plugin. |
+| `auto_match` | boolean | No | No | `advanced` | `true` | Auto-match anime to AniList entries using the item's MyAnimeList id (mal_id). |
 
 ## Development
 
