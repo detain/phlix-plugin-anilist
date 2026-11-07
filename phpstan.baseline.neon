@@ -79,10 +79,12 @@ parameters:
 			# Mixed-JSON boundary: title { romaji english native } and
 			# coverImage { large extraLarge } fragment reads in
 			# buildMetadataFromEntry — every read passes through
-			# optionalString()/scrubRemoteText() narrowing.
+			# optionalString()/scrubRemoteText() narrowing. (w06L5 retired the
+			# second 'romaji' site: the enrichment log now reads the scrubbed
+			# stored projection, not the raw entry fragment.)
 			message: '#^Cannot access offset ''romaji'' on mixed\.$#'
 			identifier: offsetAccess.nonOffsetAccessible
-			count: 2
+			count: 1
 			path: src/AniListPlugin.php
 
 		-

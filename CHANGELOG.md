@@ -17,6 +17,87 @@ ever resolvable through the dev channel (default-branch HEAD pin, version
 ## [Unreleased] — 0.4.x development line
 
 ### Fixed
+- Review-campaign batch W06-L5 (estate lane `w06L5`, register anchors
+  `plugin-anilist__srphp.md` #1–#5, `plugin-anilist__secaudit.md` #2,
+  `plugin-anilist__copywriter.md` #11; items PG-160…PG-164, PG-055):
+  - **PG-160 — the master enable now gates every timer path.** The
+    periodic-sync arm and tick consulted only the settings pair
+    (`AniListSettings::isConfigured()` — token + username), so with
+    `enabled=false` a resident worker whose timer predated the flip kept
+    walking the watchlist forever. `onEnable()` now arms only behind the
+    toggle (`src/AniListPlugin.php:228`), the arming site moved onto the
+    plugin-level `isConfigured()` — enabled AND token AND username
+    (`:1051`, `:977`) — and the tick re-checks on every fire (`:1115`),
+    so a reconfigure that flips `enabled` off lands no later than the
+    next tick. Forward-corrects this file's W05-L5 entry ("the host-armed
+    periodic sync checks only token+username+`sync_enabled` (:943/:963)" —
+    true when written, cured here) and flips the README gate sentence that
+    carried the same split (`README.md:29-32`).
+  - **PG-161 — reconfigure and disable drop the cached API client.**
+    `configure()` swapped the settings object but left the lazily built
+    `AniListApi` in place — that client signs every request with the OLD
+    bearer token, so a rotated `access_token` on a resident worker 401'd
+    until restart. Both paths now release it (`src/AniListPlugin.php:192`,
+    `:251`); `ensureApi()` rebuilds lazily on next use, and its
+    early-return-while-set law is untouched.
+  - **PG-162 — the periodic timer is tracked and removable.** The id from
+    `Timer::add()` was discarded, so `onDisable()` could not remove the
+    repeating timer and an enable/disable cycle stacked another
+    full-walk timer on the event loop. The id lives in `$periodicTimerId`
+    (`src/AniListPlugin.php:154`), arming is refused while a timer is
+    outstanding (the drainArmed discipline, `:1055`), and disable removes
+    and clears it (`:246-249`). The raw Workerman calls moved behind new
+    protected seams `addRepeatingTimer()`/`removeRepeatingTimer()`
+    (`:1078`, `:1095`) — the HttpClient sendOnce/tick posture, since no
+    Workerman runtime exists in a test process. Disclosed design change:
+    `AniListPlugin` is no longer `final` (nothing pinned the finality; the
+    lifecycle laws are now pinned behaviorally through the seams rather
+    than through reflection into the vendor class).
+  - **PG-163 — half-point scores reach the database.** AniList's
+    `MediaList.score` is a Float (users score in halves); the watchlist
+    projection ran it through an `is_int()`-only boundary, so every real
+    score of 8.5 stored as null — the authoritative write carried no
+    score at all. The boundary accepts the numeric types the JSON decoder
+    produces, nothing looser (`src/AniListPlugin.php:1243-1248`);
+    non-numerics still contribute nothing (the gap-fill merge never
+    stores empties).
+  - **PG-164 — remote-derived log fields are scrubbed and bounded.** The
+    enrichment info line logged the RAW `title.romaji` (AniList titles are
+    user-editable upstream — bidi/control characters spoof text wherever
+    logs render) and the progress-sync info line attached the whole
+    decoded mutation answer unbounded. Enrichment now logs the scrubbed
+    stored projection (`src/AniListPlugin.php:481-485`), the answer
+    becomes a bounded JSON projection via `remoteJsonForLog()` (`:961`),
+    and the shared display ceiling `MAX_LOG_FIELD_CHARS` = 200 bounds
+    both (`:103`, helpers `:664-697`). The same channel got the same
+    treatment in `HttpClient`: vendor transport error text now flows
+    through `safeErrorBodySnippet()` exactly like 4xx/5xx bodies already
+    did (`src/HttpClient.php:306`), because every caller logs the
+    exception message verbatim.
+  - **PG-055 (info) — tagline truth.** README and `composer.json` lead
+    with the two things the plugin actually does — "anime/manga metadata
+    and watchlist sync, over the AniList GraphQL API" (`README.md:6-7`,
+    `composer.json:4`) — replacing "GraphQL integration", which named the
+    transport instead of the work.
+
+  New regression surface: `tests/Unit/AniListW06L5Test.php` (19 cases —
+  dial-while-disabled refusal, client invalidation and rebuild,
+  arm-once/remove-on-disable/re-arm through the seams, the score boundary
+  dataset, log scrub/cap probes, the transport-cap pin; 15 of the 19 red
+  or fatal at the parent commit first — the four exceptions are deliberate
+  positive controls: sync still walking when enabled, and the int/string/
+  null score datasets). One disclosed golden move:
+  `tests/Unit/AniListSyncIntervalTest.php`'s source-scan pin follows the
+  call into the new seam — it still pins the variable-interval
+  `Timer::add($intervalSeconds` and still refuses the hardcoded constant,
+  and the interval law now also has behavioral proof through the seams.
+  The phpstan-only `tests/Stub/WorkermanTimer.php` mirror gained a
+  `remove()` signature beside `add()`, and the phpstan baseline's
+  `Cannot access offset 'romaji' on mixed` suppression retired from
+  count 2 to count 1 — the second raw fragment read was the very log
+  site this batch scrubbed (the surviving one is the narrowed
+  `buildMetadataFromEntry` boundary).
+
 - Review-campaign copy batch W05-L5 (estate lane `w05L5`, register
   `plugin-anilist__copywriter.md`; items PG-049…PG-054) — README/`plugin.json`
   copy truth, code untouched:

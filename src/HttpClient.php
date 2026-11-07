@@ -176,18 +176,20 @@ class HttpClient implements HttpClientInterface
     /**
      * Bound a remote error body for carriage inside an exception message.
      *
-     * Any 4xx/5xx body is fully remote-controlled: unbounded size floods the
-     * log stream, embedded newlines forge log entries, and ANSI/bidi control
-     * characters poison terminal log viewers — and call sites log this
-     * message verbatim (`'error' => $e->getMessage()`). Only a control-char
-     * stripped, whitespace-collapsed, length-capped printable excerpt is
-     * allowed to travel; the full body never leaves this method (and is not
-     * even logged at debug here — a flood-capable payload should not get a
-     * second ride into the log stream). The `HTTP <status>` prefix kept by
-     * the caller is load-bearing: {@see AniListApi::isNotFoundFailure()}
+     * Any 4xx/5xx body — and the vendor transport error text the Workerman
+     * client hands the error callback, which reaches us through the same
+     * exception channel — is fully remote-controlled: unbounded size floods
+     * the log stream, embedded newlines forge log entries, and ANSI/bidi
+     * control characters poison terminal log viewers — and call sites log
+     * this message verbatim (`'error' => $e->getMessage()`). Only a
+     * control-char stripped, whitespace-collapsed, length-capped printable
+     * excerpt is allowed to travel; the full body never leaves this method
+     * (and is not even logged at debug here — a flood-capable payload should
+     * not get a second ride into the log stream). The `HTTP <status>` prefix
+     * kept by the caller is load-bearing: {@see AniListApi::isNotFoundFailure()}
      * matches it to map 404s to null.
      *
-     * @param string $body Raw remote response body
+     * @param string $body Raw remote response body or transport error text
      *
      * @return string Printable excerpt (≤ {@see self::MAX_ERROR_BODY_SNIPPET}
      *                characters, `[truncated]` marked when capped;
@@ -296,7 +298,13 @@ class HttpClient implements HttpClientInterface
         }
 
         if ($state['error'] !== null) {
-            throw new AniListApiException('AniList HTTP error: ' . $state['error']);
+            // Vendor transport text is remote-influenced (a proxy's error
+            // page, a TLS-layer string): it gets the same scrub-and-cap the
+            // 4xx/5xx bodies get, because every caller logs this message
+            // verbatim ('error' => $e->getMessage()).
+            throw new AniListApiException(
+                'AniList HTTP error: ' . self::safeErrorBodySnippet((string) $state['error'])
+            );
         }
 
         if ($state['done'] === false) {

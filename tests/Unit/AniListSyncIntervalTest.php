@@ -60,13 +60,22 @@ final class AniListSyncIntervalTest extends TestCase
     /**
      * CONSEQUENCE: the timer call site must use the resolved value. A correct
      * resolver that nothing calls is the original defect's exact shape.
+     * (w06L5 rotated this pin from the raw Timer::add call site to the
+     * protected addRepeatingTimer seam the arming now flows through; the
+     * behavioral proof of the same law — an armed spy timer carries 900s for
+     * a 15-minute setting — lives in AniListW06L5Test.)
      */
     public function test_timer_uses_the_resolved_interval_not_the_constant(): void
     {
         $src = file_get_contents(__DIR__ . '/../../src/AniListPlugin.php');
         $this->assertIsString($src);
 
-        $this->assertStringContainsString('Timer::add($this->syncIntervalSeconds()', $src);
+        $this->assertMatchesRegularExpression(
+            '/addRepeatingTimer\(\s*\$this->syncIntervalSeconds\(\)/',
+            $src,
+            'arming must flow the resolved interval through the timer seam'
+        );
+        $this->assertStringContainsString('Timer::add($intervalSeconds', $src);
         $this->assertStringNotContainsString('Timer::add(self::SYNC_INTERVAL_SEC', $src);
     }
 }

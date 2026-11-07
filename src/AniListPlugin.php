@@ -47,9 +47,18 @@ use Psr\Log\NullLogger;
  * seam (a designated syncer would need host support); the multiplication is
  * documented honestly rather than discovered in a rate-limit incident.
  *
+ * The periodic timer's lifecycle is explicit: one arm per enable cycle (the
+ * id is kept and repeat arming is refused), and {@see onDisable()} removes
+ * it — an untracked repeating timer would survive disable and stack a new
+ * full-walk timer on every enable/disable cycle. The Workerman calls sit
+ * behind the protected {@see addRepeatingTimer()} /
+ * {@see removeRepeatingTimer()} seams (same posture as HttpClient's
+ * sendOnce/tick seams) because the Workerman runtime does not exist in a
+ * test process; that is why this class is not `final`.
+ *
  * @package Phlix\Plugins\Metadata\AniList
  */
-final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
+class AniListPlugin implements LifecycleInterface, ConfigurableInterface
 {
     /**
      * Plugin type identifier used in the plugin manifest.
@@ -85,6 +94,13 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
      * answer, and hitting it is LOUD (never a silent truncation).
      */
     private const MAX_SYNC_PAGES = 100;
+
+    /**
+     * Ceiling (characters) for one remote-derived value entering a log
+     * context — the plugin-side twin of HttpClient's error-snippet cap, for
+     * content (titles, mutation answers) rather than error bodies.
+     */
+    private const MAX_LOG_FIELD_CHARS = 200;
 
     private ?ItemRepository $itemRepository = null;
 
@@ -122,8 +138,20 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
      */
     private array $lookupMemo = [];
 
-    /** Disables all metadata enrichment and sync when false. */
+    /**
+     * Master on/off (the `enabled` setting). False disables EVERY AniList
+     * path — event-driven enrichment and progress write-back as well as the
+     * host-armed periodic sync (the gate is {@see isConfigured()}).
+     */
     private bool $enabled = false;
+
+    /**
+     * Workerman timer id of the repeating periodic-sync timer, or null when
+     * no timer is armed. Kept so {@see onDisable()} can remove the timer:
+     * Workerman timers repeat until removed, and an untracked id strands a
+     * live full-walk sync closure behind a disabled plugin.
+     */
+    private ?int $periodicTimerId = null;
 
     /** User-specific settings (tokens, username, prefs). */
     private AniListSettings $settings;
@@ -147,6 +175,12 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
      * Configure the plugin from a settings array (persisted in the DB
      * by the plugin loader and passed back on enable).
      *
+     * A reconfigure swaps the settings object, so the lazily built API
+     * client is dropped with it: that client signed every request with the
+     * OLD bearer token, and on a resident worker a rotated `access_token`
+     * would otherwise 401 forever with only a restart as the cure. The
+     * next call rebuilds it through {@see ensureApi()} on the new token.
+     *
      * @param array<string, mixed> $settings Key-value settings from plugins.settings_json
      *
      * @return void
@@ -155,6 +189,7 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
     {
         $this->settings = AniListSettings::fromArray($settings);
         $this->enabled = ($settings['enabled'] ?? false) === true;
+        $this->api = null;
     }
 
     /**
@@ -186,8 +221,11 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
         // Arming a Workerman timer is non-blocking; the sync callback connects lazily.
         // NOTE: this whole method runs inside EVERY forked worker, so each
         // worker arms its own periodic sync timer below — the interval is
-        // per-worker, not server-global (see schedulePeriodicSync()).
-        if ($this->settings->syncEnabled) {
+        // per-worker, not server-global (see schedulePeriodicSync()). The
+        // master enable gates arming (schedulePeriodicSync() re-checks the
+        // full isConfigured() gate): with enabled=false nothing here may
+        // leave a timer that later dials AniList.
+        if ($this->enabled && $this->settings->syncEnabled) {
             $this->schedulePeriodicSync();
         }
     }
@@ -195,10 +233,22 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
     /**
      * Release resources on disable.
      *
+     * Removes the repeating periodic-sync timer (an armed Workerman timer
+     * fires until explicitly removed — leaving it would keep walking the
+     * watchlist behind a disabled plugin) and drops the lazily built API
+     * client, which holds the bearer token and the vendor TLS connection
+     * pools. A later enable() re-arms and reconnects lazily.
+     *
      * @return void
      */
     public function onDisable(): void
     {
+        if ($this->periodicTimerId !== null) {
+            $this->removeRepeatingTimer($this->periodicTimerId);
+            $this->periodicTimerId = null;
+        }
+
+        $this->api = null;
         $this->itemRepository = null;
     }
 
@@ -423,10 +473,15 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
         $metadata = $this->buildMetadataFromEntry($anilistEntry);
         $this->updateMediaItemMetadata($mediaItemId, $metadata);
 
+        // Log the SCRUBBED stored projection, not the raw entry field:
+        // AniList titles are upstream user-editable and the raw value can
+        // carry bidi/control characters that spoof text wherever the log
+        // renders (the storage copy already went through scrubRemoteText());
+        // the log copy is additionally length-capped for display.
         $this->logger->info('AniList: enriched media item', [
             'media_item_id' => $mediaItemId,
-            'anilist_id' => $anilistEntry['id'] ?? null,
-            'title' => $anilistEntry['title']['romaji'] ?? 'unknown',
+            'anilist_id' => $metadata['anilist_id'],
+            'title' => self::titleForLog(self::optionalString($metadata['title_romaji'])),
         ]);
     }
 
@@ -597,6 +652,49 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
         );
 
         return is_string($scrubbed) ? $scrubbed : null;
+    }
+
+    /**
+     * Project a scrubbed remote title for one log line.
+     *
+     * Input is the value the storage copy already scrubbed (control/bidi
+     * families removed); this only adds the display cap and the missing
+     * placeholder the old raw-field fallback provided.
+     */
+    private static function titleForLog(?string $scrubbedTitle): string
+    {
+        if ($scrubbedTitle === null || $scrubbedTitle === '') {
+            return 'unknown';
+        }
+
+        return self::boundedForLog($scrubbedTitle);
+    }
+
+    /**
+     * Render a remote answer (mutation result, decoded payload fragment) for
+     * a log line as a bounded string.
+     *
+     * json_encode escapes C0 control characters, so the encoded form is
+     * log-safe on the control-char axis; the cap bounds the flood axis. An
+     * unserializable value is named, never imploded into empty prose.
+     *
+     * @param array<array-key, mixed> $value Remote-derived array
+     */
+    private static function remoteJsonForLog(array $value): string
+    {
+        $encoded = json_encode($value);
+
+        return self::boundedForLog(is_string($encoded) === true ? $encoded : '(unserializable)');
+    }
+
+    /**
+     * Cut a printable projection to the log ceiling, marking the cut.
+     */
+    private static function boundedForLog(string $text): string
+    {
+        return mb_strlen($text) > self::MAX_LOG_FIELD_CHARS
+            ? mb_substr($text, 0, self::MAX_LOG_FIELD_CHARS) . '[truncated]'
+            : $text;
     }
 
     /**
@@ -853,10 +951,14 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
         try {
             $result = $this->api->saveEpisodeProgress($anilistId, $episodeNumber);
 
+            // The SaveMediaListEntry answer is remote-controlled content:
+            // log a bounded JSON projection, never the decoded array whole
+            // (json_encode escapes control characters, and the cap keeps a
+            // pathological payload from flooding the log stream).
             $this->logger->info('AniList: synced episode progress', [
                 'anilist_id' => $anilistId,
                 'episode' => $episodeNumber,
-                'result' => $result,
+                'result' => self::remoteJsonForLog($result),
             ]);
         } catch (AniListApiException $e) {
             $this->logger->warning('AniList: failed to sync episode progress', [
@@ -930,6 +1032,12 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
      * Takes no arguments: collaborators were moved to {@see onEnable()} long
      * ago and the timer interval is resolved by {@see syncIntervalSeconds()}.
      *
+     * Gate law: the full {@see isConfigured()} gate — master enable AND token
+     * AND username — refuses arming, matching the event paths; a disabled
+     * plugin must never leave a live timer that dials AniList. Arming is
+     * idempotent while a timer is outstanding (same discipline as the
+     * drainArmed bool), so repeated enable() calls cannot stack timers.
+     *
      * HONEST SCOPE: one repeating timer per worker process. The host forks a
      * pool of resident Workerman workers and onEnable() executes in every
      * one of them, so the aggregate sync RATE is the worker count times the
@@ -940,27 +1048,71 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
      */
     private function schedulePeriodicSync(): void
     {
-        if (!$this->settings->isConfigured()) {
+        if (!$this->isConfigured() || $this->settings->syncEnabled === false) {
             return;
         }
 
-        try {
-            \Workerman\Timer::add($this->syncIntervalSeconds(), function (): void {
+        if ($this->periodicTimerId !== null) {
+            return; // already armed this enable cycle — never stack
+        }
+
+        $this->periodicTimerId = $this->addRepeatingTimer(
+            $this->syncIntervalSeconds(),
+            function (): void {
                 $this->runScheduledSync();
-            });
+            }
+        );
+    }
+
+    /**
+     * Arm one repeating Workerman timer.
+     *
+     * Protected seam (HttpClient sendOnce/tick posture): the Workerman
+     * runtime exists only inside a host worker, so the raw call is pinned
+     * here and the lifecycle laws are testable through an override. Returns
+     * the timer id for {@see removeRepeatingTimer()}, or null when the arm
+     * failed — outside a Workerman process the class is absent and the
+     * Error is caught, leaving the plugin simply unarmed (nothing throws
+     * into boot).
+     */
+    protected function addRepeatingTimer(int $intervalSeconds, callable $callback): ?int
+    {
+        try {
+            return \Workerman\Timer::add($intervalSeconds, $callback);
         } catch (\Throwable) {
             // Timer not available outside Workerman process
+            return null;
+        }
+    }
+
+    /**
+     * Disarm a timer armed through {@see addRepeatingTimer()}.
+     *
+     * The paired seam for onDisable(); failing to remove (no Workerman
+     * runtime, or an id the loop never knew) cannot break disable, so the
+     * error is swallowed the same way the arm swallows it.
+     */
+    protected function removeRepeatingTimer(int $timerId): void
+    {
+        try {
+            \Workerman\Timer::remove($timerId);
+        } catch (\Throwable) {
+            // Nothing to disarm outside a Workerman process
         }
     }
 
     /**
      * Execute the periodic watchlist sync.
      *
+     * The master enable is re-checked at every tick (not just at arming):
+     * a settings reconfigure can disable the plugin while its timer is
+     * already outstanding on a resident worker.
+     *
      * @return void
      */
     private function runScheduledSync(): void
     {
-        if (!$this->settings->isConfigured() || !$this->settings->syncEnabled) {
+        if (!$this->isConfigured() || $this->settings->syncEnabled === false) {
             return;
         }
 
@@ -1083,10 +1235,17 @@ final class AniListPlugin implements LifecycleInterface, ConfigurableInterface
             return;
         }
 
+        // AniList's MediaList.score is a Float — users score in halves (8.5).
+        // An is_int()-only boundary silently nulled every half-point score,
+        // so the authoritative watchlist write carried no score at all.
+        // Accept the decoded numeric (int|float); anything else is not a
+        // score and contributes nothing (the merge never stores empty).
+        $rawScore = $entry['score'] ?? null;
+
         $metadata = [
             'anilist_id' => $anilistId,
             'anilist_status' => $status,
-            'anilist_score' => is_int($entry['score'] ?? null) ? $entry['score'] : null,
+            'anilist_score' => (is_int($rawScore) || is_float($rawScore)) === true ? $rawScore : null,
             'anilist_progress' => is_int($entry['progress'] ?? null) ? $entry['progress'] : null,
             // The AniList favourite flag is deliberately absent: this path never
             // fetches it, and hardcoding it false wrote a lie into metadata_json

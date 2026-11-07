@@ -3,7 +3,7 @@
 [![tests](https://github.com/detain/phlix-plugin-anilist/actions/workflows/test.yml/badge.svg)](https://github.com/detain/phlix-plugin-anilist/actions/workflows/test.yml)
 
 > AniList metadata provider for [Phlix](https://github.com/detain/phlix-server) —
-> anime/manga metadata, watchlist sync, and GraphQL integration.
+> anime/manga metadata and watchlist sync, over the AniList GraphQL API.
 
 ## Overview
 
@@ -26,8 +26,10 @@ It subscribes to `phlix.library.item.added` (throttled background enrichment)
 and `phlix.playback.stopped` (episode progress sync). Every AniList feature —
 the metadata lookups included — requires both the access token and the AniList
 username to be configured: with either one missing, nothing runs (see Settings
-below). The master toggle gates the event-driven features (enrichment and
-progress write-back); the periodic list sync is armed by the host without it.
+below). The master toggle gates every AniList path on top of that: with it off
+no periodic sync timer is even armed, and sync ticks already in flight refuse
+to run — the event-driven features (enrichment and progress write-back) and
+the host-armed list sync behave the same way.
 
 ## Install
 

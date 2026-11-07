@@ -7,7 +7,7 @@
  * can be analysed at level 9: workerman ships with the host worker runtime
  * (phlix-server), never in this plugin's vendor tree. The mirror follows the
  * host vendor v5.2.3 surface used by this plugin
- * (src/Timer.php: add() :142, sleep() :183) signature-for-signature.
+ * (src/Timer.php: add(), remove(), sleep()) signature-for-signature.
  *
  * This file is deliberately NOT composer-autoloaded (tests/Stub/ has no
  * psr-4 mapping); it exists only for the PHPStan process.
@@ -28,6 +28,11 @@ class Timer
      * @param array<mixed>|null $args
      */
     public static function add(float $timeInterval, callable $func, ?array $args = [], bool $persistent = true): int
+    {
+        throw new \LogicException('PHPStan analysis-only stub; never called at runtime.');
+    }
+
+    public static function remove(int $timerId): bool
     {
         throw new \LogicException('PHPStan analysis-only stub; never called at runtime.');
     }
