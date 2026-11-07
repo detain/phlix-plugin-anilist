@@ -30,6 +30,54 @@ class AniListApi
 {
     private const BASE_URL = 'https://graphql.anilist.co';
 
+    /**
+     * Ceiling on the number of GraphQL error messages composed into one
+     * exception message (see {@see self::formatGraphQLErrors()}).
+     */
+    private const MAX_GRAPHQL_ERROR_MESSAGES = 5;
+
+    /**
+     * The shared Media field selection requested by every media-shaped
+     * query (search, search, by-id, by-MAL-id).
+     *
+     * Four near-verbatim copies of this ~26-line block had already drifted
+     * — the manga search silently lacked season/seasonYear/
+     * nextAiringEpisode that the id lookups carried — and every future
+     * field addition was a four-site edit where one missed copy becomes a
+     * response-shape bug. One const, interpolated by all four queries:
+     * fields a given entry type cannot answer (season on MANGA, chapters
+     * on ANIME) come back null, which is what the duplicate copies already
+     * produced for their mismatched halves and every consumer guards.
+     */
+    private const MEDIA_FIELDS = <<<'GRAPHQL'
+        id
+        idMal
+        title { romaji english native }
+        type
+        format
+        status
+        episodes
+        duration
+        chapters
+        volumes
+        description(asHtml: false)
+        averageScore
+        meanScore
+        popularity
+        favourites
+        genres
+        tags { name rank }
+        startDate { year month day }
+        endDate { year month day }
+        season
+        seasonYear
+        coverImage { large extraLarge }
+        bannerImage
+        externalLinks { url site }
+        relations { edges { relationType node { id title { romaji } type } } }
+        nextAiringEpisode { episode airingAt }
+        GRAPHQL;
+
     private readonly LoggerInterface $logger;
 
     /**
@@ -82,58 +130,164 @@ class AniListApi
         ], $this->headers());
 
         if (isset($response['errors']) && is_array($response['errors']) === true) {
-            $message = $this->formatGraphQLErrors($response['errors']);
-            throw new AniListApiException($message);
+            throw new AniListApiException(
+                self::formatGraphQLErrors($response['errors']),
+                notFound: self::graphQLErrorsReportNotFound($response['errors']),
+            );
         }
 
         return is_array($response['data'] ?? null) === true ? $response['data'] : [];
     }
 
     /**
-     * Format GraphQL error messages.
+     * Whether a GraphQL errors envelope is the documented not-found answer.
      *
-     * @param array<array<string, mixed>> $errors
+     * AniList answers "no such entry" with an HTTP 200 body whose error
+     * message is exactly "Not found". EQUALITY on that documented shape —
+     * not a substring scan over composed prose — is the law: an upstream
+     * fault that merely mentions the words (a revoked-token notice, a
+     * schema complaint, a CDN miss page quoted into the body) must surface
+     * as the failure it is, because the lookup wrappers memoize null as
+     * definitive absence and enrichment goes silently quiet.
      *
-     * @return string
+     * @param array<mixed, mixed> $errors Raw decoded `errors` fragment
      */
-    private function formatGraphQLErrors(array $errors): string
+    private static function graphQLErrorsReportNotFound(array $errors): bool
     {
-        $messages = [];
         foreach ($errors as $error) {
-            if (is_array($error) === true && isset($error['message'])) {
-                if (is_string($error['message']) === true) {
-                    $messages[] = $error['message'];
+            if (is_array($error) === false) {
+                continue;
+            }
 
-                    continue;
-                }
+            /** @var mixed $message */
+            $message = $error['message'] ?? null;
 
-                // json_encode() is string|false. A remote-controlled
-                // non-string message that cannot be serialized (INF from a
-                // `1e999` literal, for instance) used to implode toward empty
-                // prose while @return string promised text; name the failure
-                // in the message instead of hiding it.
-                $encoded = json_encode($error['message']);
-                $messages[] = is_string($encoded) === true ? $encoded : '(unserializable)';
+            if (is_string($message) === true && trim($message) === 'Not found') {
+                return true;
             }
         }
 
-        return $messages !== [] ? implode('; ', $messages) : 'AniList GraphQL error';
+        return false;
     }
 
     /**
-     * Whether an exception reports a plain not-found answer.
+     * Format GraphQL error messages into the exception text.
      *
-     * AniList signals "no such entry" two ways: a GraphQL error envelope
-     * whose message is "Not found" (HTTP 200 body) and a bare HTTP 404 that
-     * the transport surfaces as `AniList API returned HTTP 404: …`. Both are
-     * absence of data, not API failure, so the lookup wrappers map them to
-     * null instead of throwing.
+     * Every message is remote-controlled prose: embedded newlines forge log
+     * entries, ANSI/bidi control characters poison terminal viewers, and the
+     * size is otherwise unbounded — while every plugin catch site logs
+     * `$e->getMessage()`. The HTTP-status path already got the transport's
+     * scrub-and-cap (HttpClient); the HTTP-200 GraphQL errors envelope gets
+     * the SAME treatment now, per message, and the number of composed
+     * messages is capped with the overflow named, so a thousand-entry
+     * `errors` array cannot turn one exception into a thousand log segments.
+     *
+     * @param array<mixed, mixed> $errors Raw decoded `errors` fragment
+     *
+     * @return string
      */
-    private static function isNotFoundFailure(AniListApiException $e): bool
+    private static function formatGraphQLErrors(array $errors): string
     {
-        $message = $e->getMessage();
+        $messages = [];
+        $dropped = 0;
 
-        return str_contains($message, 'HTTP 404') || stripos($message, 'not found') !== false;
+        foreach ($errors as $error) {
+            if (is_array($error) === false || isset($error['message']) === false) {
+                $dropped++;
+                continue;
+            }
+
+            if (count($messages) >= self::MAX_GRAPHQL_ERROR_MESSAGES) {
+                $dropped++;
+                continue;
+            }
+
+            /** @var mixed $raw */
+            $raw = $error['message'];
+
+            if (is_string($raw) === true) {
+                $messages[] = HttpClient::safeErrorBodySnippet($raw);
+
+                continue;
+            }
+
+            // json_encode() is string|false. A remote-controlled non-string
+            // message that cannot be serialized (INF from a `1e999` literal,
+            // for instance) used to implode toward empty prose while @return
+            // string promised text; name the failure in the message instead
+            // of hiding it. The encoded form has its control characters
+            // escaped, and it still passes the scrub-and-cap like any other.
+            $encoded = json_encode($raw);
+            $messages[] = HttpClient::safeErrorBodySnippet(
+                is_string($encoded) === true ? $encoded : '(unserializable)'
+            );
+        }
+
+        if ($messages === []) {
+            return 'AniList GraphQL error';
+        }
+
+        if ($dropped > 0) {
+            $messages[] = '(+' . $dropped . ' more errors)';
+        }
+
+        return implode('; ', $messages);
+    }
+
+    /**
+     * Read one `Page.<field>` list projection off a decoded envelope.
+     *
+     * json_decode hands back mixed. The four list readers used to carry a
+     * decorative `@var array<array<string, mixed>>` promise over a raw
+     * nested offset read — a shape claim nothing checked, with matching
+     * phpstan offset suppressions in the baseline. This reader NARROWS:
+     * a missing or non-object Page, a non-list field, or junk rows answer
+     * as the empty/filtered list the docblock actually guarantees, and the
+     * suppressions retired with the annotation (register PG-167).
+     *
+     * @param array<string, mixed> $data  Decoded `data` envelope
+     * @param string               $field The Page child list ('media' or 'mediaList')
+     *
+     * @return list<array<array-key, mixed>>
+     */
+    private static function readPageList(array $data, string $field): array
+    {
+        $page = $data['Page'] ?? null;
+        if (is_array($page) === false) {
+            return [];
+        }
+
+        $rows = $page[$field] ?? null;
+        if (is_array($rows) === false) {
+            return [];
+        }
+
+        $entries = [];
+        foreach ($rows as $row) {
+            if (is_array($row) === true) {
+                $entries[] = $row;
+            }
+        }
+
+        return $entries;
+    }
+
+    /**
+     * Read the `Media` object projection off a decoded envelope.
+     *
+     * Same posture as {@see self::readPageList()} for the single-object
+     * twin: narrow with is_array instead of annotating an unchecked mixed
+     * read. A junk fragment is absence (null), not a type error downstream.
+     *
+     * @param array<string, mixed> $data Decoded `data` envelope
+     *
+     * @return array<array-key, mixed>|null
+     */
+    private static function readMedia(array $data): ?array
+    {
+        $media = $data['Media'] ?? null;
+
+        return is_array($media) === true ? $media : null;
     }
 
     /**
@@ -146,42 +300,18 @@ class AniListApi
      * @param int $page Page number (1-indexed)
      * @param int $perPage Results per page (max 50)
      *
-     * @return array<array<string, mixed>> List of anime entries
+     * @return list<array<array-key, mixed>> List of anime entries
      *
      * @throws AniListApiException
      */
     public function searchAnime(string $search, int $page = 1, int $perPage = 25): array
     {
-        $query = <<<'GRAPHQL'
-        query SearchAnime($search: String, $page: Int, $perPage: Int) {
-            Page(page: $page, perPage: $perPage) {
-                media(search: $search, type: ANIME) {
-                    id
-                    idMal
-                    title { romaji english native }
-                    type
-                    format
-                    status
-                    episodes
-                    duration
-                    chapters
-                    volumes
-                    description(asHtml: false)
-                    averageScore
-                    meanScore
-                    popularity
-                    favourites
-                    genres
-                    tags { name rank }
-                    startDate { year month day }
-                    endDate { year month day }
-                    season
-                    seasonYear
-                    coverImage { large extraLarge }
-                    bannerImage
-                    externalLinks { url site }
-                    relations { edges { relationType node { id title { romaji } type } } }
-                    nextAiringEpisode { episode airingAt }
+        $selection = self::MEDIA_FIELDS;
+        $query = <<<GRAPHQL
+        query SearchAnime(\$search: String, \$page: Int, \$perPage: Int) {
+            Page(page: \$page, perPage: \$perPage) {
+                media(search: \$search, type: ANIME) {
+        {$selection}
                 }
             }
         }
@@ -193,8 +323,7 @@ class AniListApi
             'perPage' => min($perPage, 50),
         ]);
 
-        /** @var array<array<string, mixed>> */
-        return $data['Page']['media'] ?? [];
+        return self::readPageList($data, 'media');
     }
 
     /**
@@ -207,39 +336,18 @@ class AniListApi
      * @param int $page Page number (1-indexed)
      * @param int $perPage Results per page (max 50)
      *
-     * @return array<array<string, mixed>> List of manga entries
+     * @return list<array<array-key, mixed>> List of manga entries
      *
      * @throws AniListApiException
      */
     public function searchManga(string $search, int $page = 1, int $perPage = 25): array
     {
-        $query = <<<'GRAPHQL'
-        query SearchManga($search: String, $page: Int, $perPage: Int) {
-            Page(page: $page, perPage: $perPage) {
-                media(search: $search, type: MANGA) {
-                    id
-                    idMal
-                    title { romaji english native }
-                    type
-                    format
-                    status
-                    episodes
-                    duration
-                    chapters
-                    volumes
-                    description(asHtml: false)
-                    averageScore
-                    meanScore
-                    popularity
-                    favourites
-                    genres
-                    tags { name rank }
-                    startDate { year month day }
-                    endDate { year month day }
-                    coverImage { large extraLarge }
-                    bannerImage
-                    externalLinks { url site }
-                    relations { edges { relationType node { id title { romaji } type } } }
+        $selection = self::MEDIA_FIELDS;
+        $query = <<<GRAPHQL
+        query SearchManga(\$search: String, \$page: Int, \$perPage: Int) {
+            Page(page: \$page, perPage: \$perPage) {
+                media(search: \$search, type: MANGA) {
+        {$selection}
                 }
             }
         }
@@ -251,8 +359,7 @@ class AniListApi
             'perPage' => min($perPage, 50),
         ]);
 
-        /** @var array<array<string, mixed>> */
-        return $data['Page']['media'] ?? [];
+        return self::readPageList($data, 'media');
     }
 
     /**
@@ -267,41 +374,17 @@ class AniListApi
      *
      * @param int $id AniList media ID
      *
-     * @return array<string, mixed>|null Media entry, or null when no such entry exists
+     * @return array<array-key, mixed>|null Media entry, or null when no such entry exists
      *
      * @throws AniListApiException On any non-not-found API failure
      */
     public function getMediaById(int $id): ?array
     {
-        $query = <<<'GRAPHQL'
-        query GetMedia($id: Int) {
-            Media(id: $id) {
-                id
-                idMal
-                title { romaji english native }
-                type
-                format
-                status
-                episodes
-                duration
-                chapters
-                volumes
-                description(asHtml: false)
-                averageScore
-                meanScore
-                popularity
-                favourites
-                genres
-                tags { name rank }
-                startDate { year month day }
-                endDate { year month day }
-                season
-                seasonYear
-                coverImage { large extraLarge }
-                bannerImage
-                externalLinks { url site }
-                relations { edges { relationType node { id title { romaji } type } } }
-                nextAiringEpisode { episode airingAt }
+        $selection = self::MEDIA_FIELDS;
+        $query = <<<GRAPHQL
+        query GetMedia(\$id: Int) {
+            Media(id: \$id) {
+        {$selection}
             }
         }
         GRAPHQL;
@@ -309,7 +392,7 @@ class AniListApi
         try {
             $data = $this->query($query, ['id' => $id]);
         } catch (AniListApiException $e) {
-            if (self::isNotFoundFailure($e) === false) {
+            if ($e->isNotFound() === false) {
                 throw $e;
             }
 
@@ -318,8 +401,7 @@ class AniListApi
             return null;
         }
 
-        /** @var array<string, mixed>|null */
-        return $data['Media'] ?? null;
+        return self::readMedia($data);
     }
 
     /**
@@ -331,41 +413,17 @@ class AniListApi
      *
      * @param int $malId MyAnimeList ID
      *
-     * @return array<string, mixed>|null Media entry, or null when no such entry exists
+     * @return array<array-key, mixed>|null Media entry, or null when no such entry exists
      *
      * @throws AniListApiException On any non-not-found API failure
      */
     public function getMediaByMalId(int $malId): ?array
     {
-        $query = <<<'GRAPHQL'
-        query GetMediaByMalId($idMal: Int) {
-            Media(idMal: $idMal) {
-                id
-                idMal
-                title { romaji english native }
-                type
-                format
-                status
-                episodes
-                duration
-                chapters
-                volumes
-                description(asHtml: false)
-                averageScore
-                meanScore
-                popularity
-                favourites
-                genres
-                tags { name rank }
-                startDate { year month day }
-                endDate { year month day }
-                season
-                seasonYear
-                coverImage { large extraLarge }
-                bannerImage
-                externalLinks { url site }
-                relations { edges { relationType node { id title { romaji } type } } }
-                nextAiringEpisode { episode airingAt }
+        $selection = self::MEDIA_FIELDS;
+        $query = <<<GRAPHQL
+        query GetMediaByMalId(\$idMal: Int) {
+            Media(idMal: \$idMal) {
+        {$selection}
             }
         }
         GRAPHQL;
@@ -373,7 +431,7 @@ class AniListApi
         try {
             $data = $this->query($query, ['idMal' => $malId]);
         } catch (AniListApiException $e) {
-            if (self::isNotFoundFailure($e) === false) {
+            if ($e->isNotFound() === false) {
                 throw $e;
             }
 
@@ -382,8 +440,7 @@ class AniListApi
             return null;
         }
 
-        /** @var array<string, mixed>|null */
-        return $data['Media'] ?? null;
+        return self::readMedia($data);
     }
 
     /**
@@ -446,7 +503,7 @@ class AniListApi
      * @param int $page Page number
      * @param int $perPage Items per page
      *
-     * @return array<array<string, mixed>> User's media list entries
+     * @return list<array<array-key, mixed>> User's media list entries
      *
      * @throws AniListApiException
      */
@@ -496,8 +553,7 @@ class AniListApi
 
         $data = $this->query($query, $variables);
 
-        /** @var array<array<string, mixed>> */
-        return $data['Page']['mediaList'] ?? [];
+        return self::readPageList($data, 'mediaList');
     }
 
     /**
@@ -516,7 +572,7 @@ class AniListApi
      * @param int $page Page number
      * @param int $perPage Items per page
      *
-     * @return array<array<string, mixed>> User's media list entries
+     * @return list<array<array-key, mixed>> User's media list entries
      *
      * @throws AniListApiException
      */
@@ -567,8 +623,7 @@ class AniListApi
 
         $data = $this->query($query, $variables);
 
-        /** @var array<array<string, mixed>> */
-        return $data['Page']['mediaList'] ?? [];
+        return self::readPageList($data, 'mediaList');
     }
 
     /**

@@ -17,6 +17,74 @@ ever resolvable through the dev channel (default-branch HEAD pin, version
 ## [Unreleased] — 0.4.x development line
 
 ### Fixed
+- Review-campaign batch W14-L8 (estate lane `w14L8`, register anchors
+  `plugin-anilist__srphp.md` #6/#7/#16, `plugin-anilist__secaudit.md`
+  #1/#4/#5/#7; items PG-165…PG-170):
+  - **PG-165 — not-found is a typed signal, never message prose.**
+    `AniListApiException` now carries the answering HTTP status and an
+    explicit not-found flag (`src/AniListApiException.php`), the transport
+    attaches the status on every 4xx throw
+    (`src/HttpClient.php request()`), and the GraphQL-envelope arm sets the
+    flag only when a message EQUALS the documented `Not found` answer
+    (`AniListApi::graphQLErrorsReportNotFound()`). The lookup wrappers
+    classify through `$e->isNotFound()`
+    (`src/AniListApi.php:getMediaById()/getMediaByMalId()`); the retired
+    prose scan (`isNotFoundFailure()`) matched `not found` case-insensitively
+    across messages that embed remote-controlled error text, so a
+    revoked-token notice or CDN miss blurb containing the words was memoized
+    as definitive absence and enrichment went silently quiet. A transport
+    error answered with no HTTP status can never classify as not-found, and
+    the ceiling refusal below deliberately carries no status.
+  - **PG-166 — the four media queries share one field selection.** The
+    ~26-field `Media` projection was copied four times and had already
+    drifted (`searchManga` lacked `season`/`seasonYear`/`nextAiringEpisode`
+    its twins carried); it is now `AniListApi::MEDIA_FIELDS`, interpolated by
+    `searchAnime`/`searchManga`/`getMediaById`/`getMediaByMalId`
+    (equivalence pinned in `tests/Unit/AniListW14L8Test.php`). Fields an
+    entry type cannot answer return null — the same shape the mismatched
+    copies already produced. The list queries' type-appropriate media
+    sub-projections stay separate by design.
+  - **PG-167 — typed boundary readers replace decorative `@var`s.** The four
+    Page-list returns and two `Media` object returns carried `@var` shape
+    promises over unchecked `json_decode` offset reads (with matching phpstan
+    baseline suppressions). `readPageList()`/`readMedia()` narrow with real
+    `is_array` guards (`src/AniListApi.php`), the cooperative-wait `$state`
+    literal in `src/HttpClient.php` declares its shape and narrows
+    `Retry-After` at the seam, and the decorative `(string)` cast at the
+    transport-error throw is gone. Five `AniListApi.php` entries retired from
+    `phpstan.baseline.neon`; the remaining plugin-side fragment entries are
+    untouched.
+  - **PG-168 — GraphQL error prose enters the log channel scrubbed and
+    capped.** The HTTP-200 errors envelope used to compose raw remote prose
+    into the exception message every catch site logs: newlines forged log
+    entries, ANSI/bidi characters poisoned terminal viewers, size was
+    unbounded. Each message now passes the transport's scrub-and-cap (now
+    shared: `HttpClient::safeErrorBodySnippet()`), and the envelope carries
+    at most `MAX_GRAPHQL_ERROR_MESSAGES` (5) messages with the overflow named
+    as `(+N more errors)` (`src/AniListApi.php formatGraphQLErrors()`).
+  - **PG-169 — the bearer token is guarded at the settings boundary.** A
+    bearer value rides the Authorization header verbatim, so an embedded
+    CR/LF or space is a header-splitting primitive. `AniListSettings` now
+    enforces a printable-ASCII pattern (`TOKEN_PATTERN`): the constructor
+    refuses a dirty token loudly, and the `fromArray()` parse boundary trims
+    paste whitespace then fails CLOSED to "no token" (the plugin reports
+    itself unconfigured instead of crash-looping a boot on a bad persisted
+    blob) instead of ever replaying the value (`src/AniListSettings.php`).
+  - **PG-170 — success-path response bodies have a ceiling.** The 4xx/5xx
+    path worried about flood-capable payloads; the success path decoded
+    anything. `HttpClient::MAX_RESPONSE_BYTES` (8 MiB) now refuses an
+    oversized 200 body before `json_decode`, as an API failure that can
+    never classify as absence (`src/HttpClient.php request()`).
+  - Folded review rows: the decorative arm-path pin
+    `test_periodic_timer_never_arms_while_disabled` was rebuilt through the
+    timer spy (a gate-strip now reddens it — proven by mutation; the plain
+    plugin form could not fail because the real `addRepeatingTimer()` seam
+    catch-nulls in a test process). The W06-L5 lane digest attributed its
+    suite delta as "+2A seam-pin rotation" where the split is +1A rotation
+    and +1A mechanical file count of the namespace-parity sweep — the
+    committed entry's own wording ("One disclosed golden move") was accurate,
+    so nothing is rewritten; this batch's figures are simply taken from the
+    measured red.
 - Review-campaign batch W06-L5 (estate lane `w06L5`, register anchors
   `plugin-anilist__srphp.md` #1–#5, `plugin-anilist__secaudit.md` #2,
   `plugin-anilist__copywriter.md` #11; items PG-160…PG-164, PG-055):

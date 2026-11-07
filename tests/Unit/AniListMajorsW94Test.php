@@ -148,8 +148,10 @@ final class AniListMajorsW94Test extends TestCase
 
     public function testHttpStatusPrefixSurvivesForTheNotFoundContract(): void
     {
-        // AniListApi::isNotFoundFailure() keys the 404-to-null mapping on the
-        // literal 'HTTP 404'; the sanitizer must never eat the prefix.
+        // PG-165 (w14L8): the not-found classification moved to TYPED data
+        // on the exception (the status rides httpStatus() now), but the
+        // 'HTTP <status>' prefix stays in the message — it is what humans
+        // read in the log line, and the sanitizer must never eat it.
         $client = $this->clientReturning(['status' => 404, 'body' => '{"errors":[{"message":"Not found"}]}']);
 
         try {

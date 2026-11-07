@@ -9,48 +9,14 @@ parameters:
 		# values), intentional defensive guards whose runtime payload is
 		# wider than the docblock claims, and one dead-stub return type —
 		# each entry attributable to concrete sites below.
-		-
-			# formatGraphQLErrors(): @param documents array<array<string,mixed>>
-			# but the caller hands it raw decoded $response['errors']; the
-			# in-loop is_array() guard is the deliberate runtime defense —
-			# annotation-vs-guard tension, not a defect (the guard must stay).
-			message: '#^Call to function is_array\(\) with array\<string, mixed\> will always evaluate to true\.$#'
-			identifier: function.alreadyNarrowedType
-			count: 1
-			path: src/AniListApi.php
-
-		-
-			# Mixed-JSON boundary: offset reads on raw decoded GraphQL values
-			# (search/list entry `media` nodes). All consumers is_array-guard
-			# the node before use; phpstan cannot type json_decode fragments.
-			message: '#^Cannot access offset ''media'' on mixed\.$#'
-			identifier: offsetAccess.nonOffsetAccessible
-			count: 2
-			path: src/AniListApi.php
-
-		-
-			# Mixed-JSON boundary: `mediaList` offset under Page (anime/manga
-			# list readers) — same family as above.
-			message: '#^Cannot access offset ''mediaList'' on mixed\.$#'
-			identifier: offsetAccess.nonOffsetAccessible
-			count: 2
-			path: src/AniListApi.php
-
-		-
-			message: '#^Parameter \#1 \$errors of method Phlix\\Plugins\\Metadata\\AniList\\AniListApi\:\:formatGraphQLErrors\(\) expects array\<array\<string, mixed\>\>, array\<mixed, mixed\> given\.$#'
-			identifier: argument.type
-			count: 1
-			path: src/AniListApi.php
-
-		-
-			# Same site as the is_array entry above (`=== true` on a
-			# doc-certain value); PSR-12-house `=== true` literal style keeps
-			# the guard visible — intentional, see first entry.
-			message: '#^Strict comparison using \=\=\= between true and true will always evaluate to true\.$#'
-			identifier: identical.alwaysTrue
-			count: 1
-			path: src/AniListApi.php
-
+		#
+		# w14L8 (register PG-167/PG-168) retired five AniListApi.php entries
+		# from this baseline — the formatGraphQLErrors argument/is_array/
+		# strict-comparison trio (the parameter now documents the raw mixed
+		# fragment it receives and the loop guards it honestly), and the
+		# four Page-offset suppressions (the reads now go through the typed
+		# readPageList()/readMedia() boundary readers, so the offsets are no
+		# longer reached through mixed at all).
 		-
 			message: '#^Cannot access offset ''english'' on mixed\.$#'
 			identifier: offsetAccess.nonOffsetAccessible

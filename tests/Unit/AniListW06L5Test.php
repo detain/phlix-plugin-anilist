@@ -23,7 +23,10 @@
  * Test order: every case that needs no timer spy comes first — at the parent
  * commit the spy cases below die on the pre-fix `final` class modifier, and
  * the register of per-test failures above that fatal is the red-parent
- * evidence for each law independently.
+ * evidence for each law independently. Sole exception: finding #1's
+ * arm-path pin (`test_periodic_timer_never_arms_while_disabled`) was rebuilt
+ * through the spy in a later batch (its plain-plugin form could not fail),
+ * and now sits as a spy consumer inside the no-spy run.
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  * @license   MIT
@@ -208,15 +211,21 @@ final class AniListW06L5Test extends TestCase
 
     public function test_periodic_timer_never_arms_while_disabled(): void
     {
-        $plugin = $this->makePlugin(
-            new AniListSettings(accessToken: 'test-token', username: 'testuser', syncEnabled: true),
-            new NullLogger(),
-            null,
-            enabled: false,
-        );
+        // Rebuilt through the timer spy (review w06L5, Minor 1). The original
+        // drove schedulePeriodicSync on a plain plugin, so the arm fell into
+        // the REAL addRepeatingTimer() seam — whose catch-throwable arm
+        // returns null in a test process whatever the gate decides — and the
+        // assertNull could not fail. Through the spy the refusal is observed
+        // where the law lives: an un-gated armer appends an arm.
+        $plugin = $this->makeTimerSpyPlugin(enabled: false);
 
         $this->invoke($plugin, 'schedulePeriodicSync');
 
+        $this->assertSame(
+            [],
+            $plugin->arms,
+            'a disabled-but-connected plugin must not even attempt to arm the periodic timer'
+        );
         $this->assertNull($this->getProp($plugin, 'periodicTimerId'));
     }
 

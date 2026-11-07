@@ -65,6 +65,22 @@ class HttpClient implements HttpClientInterface
     private const MAX_BACKOFF_SEC = 60.0;
 
     /**
+     * Ceiling (bytes) for a buffered success-path response body.
+     *
+     * The error path deliberately worries about flood-capable payloads and
+     * bounds its excerpt (safeErrorBodySnippet); the success path buffered
+     * and json_decode()d whatever arrived with no ceiling at all. A hostile
+     * or compromised upstream answering 200 with a gigabyte JSON inflates
+     * the resident worker through the decoder (decode multiplies memory
+     * several-fold) and the retained copy. Strict TLS to a fixed endpoint
+     * keeps this defense-in-depth, and the vendor buffers the message
+     * before this seam sees it — what the ceiling guarantees is that no
+     * response above it is ever decoded, duplicated into handler state,
+     * or kept alive in a resident worker.
+     */
+    private const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
+
+    /**
      * Ceiling (characters) for the remote error-body excerpt carried in an
      * exception message (see {@see self::safeErrorBodySnippet()}).
      */
@@ -154,7 +170,17 @@ class HttpClient implements HttpClientInterface
 
             if ($status >= 400) {
                 throw new AniListApiException(
-                    'AniList API returned HTTP ' . $status . ': ' . self::safeErrorBodySnippet($raw['body'])
+                    'AniList API returned HTTP ' . $status . ': ' . self::safeErrorBodySnippet($raw['body']),
+                    $status,
+                );
+            }
+
+            if (strlen($raw['body']) > self::MAX_RESPONSE_BYTES) {
+                // Fail the request above the ceiling — an oversized success
+                // body is an API failure, never an absence (isNotFound stays
+                // false, so no lookup can memoize it as "no entry").
+                throw new AniListApiException(
+                    'AniList response body exceeded the ' . self::MAX_RESPONSE_BYTES . '-byte ceiling'
                 );
             }
 
@@ -186,8 +212,14 @@ class HttpClient implements HttpClientInterface
      * excerpt is allowed to travel; the full body never leaves this method
      * (and is not even logged at debug here — a flood-capable payload should
      * not get a second ride into the log stream). The `HTTP <status>` prefix
-     * kept by the caller is load-bearing: {@see AniListApi::isNotFoundFailure()}
-     * matches it to map 404s to null.
+     * kept by the caller stays for human readers of the log line; the
+     * not-found classification AniListApi performs is TYPED (the answering
+     * status rides on the exception itself, see
+     * {@see AniListApiException::httpStatus()}).
+     *
+     * Shared with {@see AniListApi::formatGraphQLErrors()}: the HTTP-200
+     * GraphQL errors envelope carries the same remote-controlled prose and
+     * gets exactly this scrub-and-cap per message.
      *
      * @param string $body Raw remote response body or transport error text
      *
@@ -195,7 +227,7 @@ class HttpClient implements HttpClientInterface
      *                characters, `[truncated]` marked when capped;
      *                '(no printable body)' when nothing was displayable)
      */
-    private static function safeErrorBodySnippet(string $body): string
+    public static function safeErrorBodySnippet(string $body): string
     {
         // Newlines are the log-forgery vector, so they collapse to spaces
         // first; the remaining C0/C1, DEL, bidi and zero-width families are
@@ -242,6 +274,14 @@ class HttpClient implements HttpClientInterface
             throw new AniListApiException('Workerman HTTP client is unavailable in this runtime');
         }
 
+        /**
+         * Cooperative-wait state. The shape is DECLARED (register PG-167):
+         * before this, the literal's type was only ever "proven" by the
+         * happy path, and the closures below wrote whatever the vendor
+         * handed them into it.
+         *
+         * @var array{done: bool, status: int, body: string, retry_after: string|null, error: string|null} $state
+         */
         $state = [
             'done' => false,
             'status' => 0,
@@ -270,7 +310,11 @@ class HttpClient implements HttpClientInterface
                 $state['status'] = (int) $response->getStatusCode();
                 $state['body'] = (string) $response->getBody();
                 $retryAfter = $response->getHeaderLine('Retry-After');
-                $state['retry_after'] = $retryAfter !== '' ? $retryAfter : null;
+                // The vendor surface is untyped here (mixed); the declared
+                // shape demands the string actually be narrowed.
+                $state['retry_after'] = is_string($retryAfter) === true && $retryAfter !== ''
+                    ? $retryAfter
+                    : null;
                 $state['done'] = true;
             },
             'error' => function ($error) use (&$state): void {
@@ -301,9 +345,11 @@ class HttpClient implements HttpClientInterface
             // Vendor transport text is remote-influenced (a proxy's error
             // page, a TLS-layer string): it gets the same scrub-and-cap the
             // 4xx/5xx bodies get, because every caller logs this message
-            // verbatim ('error' => $e->getMessage()).
+            // verbatim ('error' => $e->getMessage()). No status is attached:
+            // a transport failure answered with no HTTP status at all, and
+            // "no status" must never classify as not-found.
             throw new AniListApiException(
-                'AniList HTTP error: ' . self::safeErrorBodySnippet((string) $state['error'])
+                'AniList HTTP error: ' . self::safeErrorBodySnippet($state['error'])
             );
         }
 

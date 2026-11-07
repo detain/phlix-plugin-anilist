@@ -23,11 +23,25 @@ namespace Phlix\Plugins\Metadata\AniList;
 final class AniListSettings
 {
     /**
+     * Accepted shape for a bearer token: printable ASCII, no whitespace,
+     * no control characters.
+     *
+     * The value is concatenated verbatim into the Authorization header, so
+     * an embedded CR/LF or space is a header-splitting primitive, and
+     * ANSI/bidi characters poison every later render of the value. AniList
+     * tokens are opaque printable-ASCII strings; anything that fails this
+     * pattern cannot be a real token and will never be stored or replayed.
+     */
+    private const TOKEN_PATTERN = '/^[\x21-\x7E]+$/';
+
+    /**
      * @param string|null $accessToken AniList API access token (null when not authenticated)
      * @param string $username AniList username for watchlist sync
      * @param bool $syncEnabled Whether watchlist sync is enabled
      * @param int $syncIntervalMinutes How often to run sync (in minutes)
      * @param bool $autoMatch Whether to auto-match local media to AniList entries
+     *
+     * @throws \InvalidArgumentException When a non-empty token violates {@see self::TOKEN_PATTERN}
      */
     public function __construct(
         private readonly ?string $accessToken = null,
@@ -36,6 +50,16 @@ final class AniListSettings
         public readonly int $syncIntervalMinutes = 60,
         public readonly bool $autoMatch = true,
     ) {
+        // Class invariant, loud at construction: a dirty bearer value must
+        // be unrepresentable. {@see fromArray()} sanitizes first — the
+        // constructor is where API consumers that skip the parse boundary
+        // get the refusal.
+        if ($accessToken !== null && $accessToken !== '' && preg_match(self::TOKEN_PATTERN, $accessToken) !== 1) {
+            throw new \InvalidArgumentException(
+                'AniList access token must be printable ASCII with no whitespace or control characters'
+                . ' (a bearer value rides the Authorization header verbatim)'
+            );
+        }
     }
 
     /**
@@ -62,6 +86,9 @@ final class AniListSettings
     /**
      * Create settings from an array (as loaded from DB settings JSON).
      *
+     * The token passes the parse-boundary guard below; every other field
+     * keeps its type-fallback law.
+     *
      * @param array<string, mixed> $data Key-value array from settings_json
      *
      * @return self
@@ -69,7 +96,7 @@ final class AniListSettings
     public static function fromArray(array $data): self
     {
         return new self(
-            accessToken: is_string($data['access_token'] ?? null) === true ? $data['access_token'] : null,
+            accessToken: self::parseToken($data['access_token'] ?? null),
             username: is_string($data['username'] ?? null) === true ? $data['username'] : '',
             syncEnabled: is_bool($data['sync_enabled'] ?? null) === true ? $data['sync_enabled'] : true,
             syncIntervalMinutes: is_int($data['sync_interval_minutes'] ?? null) === true
@@ -77,6 +104,43 @@ final class AniListSettings
                 : 60,
             autoMatch: is_bool($data['auto_match'] ?? null) === true ? $data['auto_match'] : true,
         );
+    }
+
+    /**
+     * Parse-boundary guard for the pasted (and host-persisted) token.
+     *
+     * Trim first — a paste carries a trailing newline more often than not,
+     * and trimming it is not a security weakening (whitespace is not part
+     * of any valid token). A value that is still dirty after trimming —
+     * embedded control character, interior space, header-splitting payload
+     * — is NOT stored: this fails CLOSED to "no token" rather than
+     * throwing, because fromArray runs on persisted blobs at enable time
+     * inside every forked worker, and a throw there crash-loops the host
+     * boot. Fail-closed means the plugin reports itself unconfigured
+     * (`has_token` false in the SPA projection) and dials nothing until
+     * the admin pastes a clean token — never replay.
+     *
+     * @param mixed $raw Raw `access_token` candidate
+     *
+     * @return string|null A token that satisfies {@see self::TOKEN_PATTERN}, or null
+     */
+    private static function parseToken(mixed $raw): ?string
+    {
+        if (is_string($raw) === false) {
+            return null;
+        }
+
+        $trimmed = trim($raw);
+
+        if ($trimmed === '') {
+            return null;
+        }
+
+        if (preg_match(self::TOKEN_PATTERN, $trimmed) !== 1) {
+            return null;
+        }
+
+        return $trimmed;
     }
 
     /**

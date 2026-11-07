@@ -255,10 +255,17 @@ final class AniListMinorsW7Test extends TestCase
 
     public function testGetMediaByIdMapsTransportHttp404ToNull(): void
     {
+        // PG-165 rotation (w14L8): the transport now attaches the answering
+        // status as TYPED data on the exception; the double simulates what
+        // the real HttpClient throws — classification reads the status,
+        // never the message prose.
         $http = new class implements HttpClientInterface {
             public function post(string $url, array $data, array $headers = []): array
             {
-                throw new AniListApiException('AniList API returned HTTP 404: {"errors":[{"message":"Not found"}]}');
+                throw new AniListApiException(
+                    'AniList API returned HTTP 404: {"errors":[{"message":"Not found"}]}',
+                    404,
+                );
             }
 
             public function get(string $url, array $params = [], array $headers = []): array
