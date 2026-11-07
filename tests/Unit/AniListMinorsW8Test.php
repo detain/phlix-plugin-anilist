@@ -87,7 +87,7 @@ final class AniListMinorsW8Test extends TestCase
         $this->assertIsArray($lock);
         foreach ($lock['packages'] as $package) {
             if ($package['name'] === 'detain/phlix-shared') {
-                $this->assertSame('v0.52.0', $package['version'], 'the tracked lock must carry the estate-current shared era');
+                $this->assertSame('v0.54.0', $package['version'], 'the tracked lock must carry the estate-current shared era');
             }
         }
     }
