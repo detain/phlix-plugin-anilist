@@ -50,11 +50,14 @@ use Psr\Log\NullLogger;
  * The periodic timer's lifecycle is explicit: one arm per enable cycle (the
  * id is kept and repeat arming is refused), and {@see onDisable()} removes
  * it — an untracked repeating timer would survive disable and stack a new
- * full-walk timer on every enable/disable cycle. The Workerman calls sit
+ * full-walk timer on every enable/disable cycle. The enrichment drain
+ * chain is ended by onDisable() too (backlog dropped, drain generation
+ * bumped so an outstanding one-shot tick no-ops). The Workerman calls sit
  * behind the protected {@see addRepeatingTimer()} /
- * {@see removeRepeatingTimer()} seams (same posture as HttpClient's
- * sendOnce/tick seams) because the Workerman runtime does not exist in a
- * test process; that is why this class is not `final`.
+ * {@see removeRepeatingTimer()} / {@see addOneShotTimer()} seams (same
+ * posture as HttpClient's sendOnce/tick seams) because the Workerman
+ * runtime does not exist in a test process; that is why this class is not
+ * `final`.
  *
  * @package Phlix\Plugins\Metadata\AniList
  */
@@ -123,6 +126,20 @@ class AniListPlugin implements LifecycleInterface, ConfigurableInterface
 
     /** Whether a drain timer is currently armed (prevents double-arming). */
     private bool $drainArmed = false;
+
+    /**
+     * Drain-chain generation, bumped by {@see onDisable()}.
+     *
+     * The drain timer is a one-shot Workerman timer whose closure captures
+     * the generation current at arming; a tick whose captured generation no
+     * longer matches is a stale leftover from a disabled cycle and no-ops.
+     * Without it, a tick already in flight at disable would rebuild the API
+     * client (re-holding the bearer secret {@see onDisable()} just dropped)
+     * and only miss the network because the repository happened to be null —
+     * and after a re-enable it would run beside the new cycle's chain,
+     * doubling the enrichment rate.
+     */
+    private int $drainGeneration = 0;
 
     /**
      * mal_id => AniList entry (null = definitive not-found), scoped to one
@@ -239,6 +256,13 @@ class AniListPlugin implements LifecycleInterface, ConfigurableInterface
      * client, which holds the bearer token and the vendor TLS connection
      * pools. A later enable() re-arms and reconnects lazily.
      *
+     * The enrichment drain chain is ended explicitly rather than by the
+     * accident of a null repository: the backlog and the per-cycle lookup
+     * memo are dropped, the drain-armed flag is cleared honestly (any
+     * outstanding one-shot tick is now stale), and the drain generation is
+     * bumped so that stale tick no-ops instead of rebuilding the client or
+     * running beside a later cycle's chain.
+     *
      * @return void
      */
     public function onDisable(): void
@@ -247,6 +271,11 @@ class AniListPlugin implements LifecycleInterface, ConfigurableInterface
             $this->removeRepeatingTimer($this->periodicTimerId);
             $this->periodicTimerId = null;
         }
+
+        $this->enrichQueue = [];
+        $this->resetLookupMemo();
+        $this->drainArmed = false;
+        $this->drainGeneration++;
 
         $this->api = null;
         $this->itemRepository = null;
@@ -320,6 +349,10 @@ class AniListPlugin implements LifecycleInterface, ConfigurableInterface
      * worker isn't left with an idle tick firing forever once the backlog is
      * cleared (Workerman timers repeat by default).
      *
+     * The closure captures the current {@see self::$drainGeneration}; a tick
+     * that fires after {@see onDisable()} bumped it is stale and returns
+     * without touching the queue, the flag or the API client.
+     *
      * @return void
      */
     private function armDrainTimer(): void
@@ -328,17 +361,25 @@ class AniListPlugin implements LifecycleInterface, ConfigurableInterface
             return;
         }
 
-        try {
-            \Workerman\Timer::add(self::ENRICH_INTERVAL_SEC, function (): void {
-                $this->onDrainTick();
-            }, [], false);
+        $generation = $this->drainGeneration;
+        $armed = $this->addOneShotTimer(self::ENRICH_INTERVAL_SEC, function () use ($generation): void {
+            if ($generation !== $this->drainGeneration) {
+                return; // stale tick from a disabled cycle — never dial
+            }
+
+            $this->onDrainTick();
+        });
+
+        if ($armed === true) {
             $this->drainArmed = true;
-        } catch (\Throwable) {
-            // Timer unavailable (not inside a Workerman worker). Leave the items
-            // queued rather than draining inline; events are only dispatched in
-            // resident workers where the timer is available.
-            $this->logger->debug('AniList: enrichment timer unavailable, deferring drain');
+
+            return;
         }
+
+        // Timer unavailable (not inside a Workerman worker). Leave the items
+        // queued rather than draining inline; events are only dispatched in
+        // resident workers where the timer is available.
+        $this->logger->debug('AniList: enrichment timer unavailable, deferring drain');
     }
 
     /**
@@ -352,11 +393,24 @@ class AniListPlugin implements LifecycleInterface, ConfigurableInterface
      * item is therefore logged and dropped from the queue (drainOne() pops
      * before work), and the walk always continues (M-ANILIST-06).
      *
+     * The full {@see isConfigured()} gate is re-checked at every tick (the
+     * runScheduledSync() posture): a configure() that turns the master
+     * enable off, or clears the token/username, while a tick is outstanding
+     * ends the chain here — the backlog is dropped (event paths refuse new
+     * items while unconfigured anyway) and nothing re-arms or dials.
+     *
      * @return void
      */
     private function onDrainTick(): void
     {
         $this->drainArmed = false;
+
+        if ($this->isConfigured() === false) {
+            $this->enrichQueue = [];
+            $this->resetLookupMemo();
+
+            return;
+        }
 
         try {
             $this->drainOne();
@@ -601,8 +655,9 @@ class AniListPlugin implements LifecycleInterface, ConfigurableInterface
      * `['romaji']` / `['large']` straight off them was offset access on
      * mixed (five baseline suppressions). Same posture as
      * AniListApi::readMedia(): NARROW instead of annotate. A missing, null
-     * or non-object fragment answers as the empty array, so every member
-     * read below falls through to null exactly as an absent field did.
+     * or non-array fragment answers as the empty array (a list passes
+     * through; its named-member reads miss), so every member read below
+     * falls through to null exactly as an absent field did.
      *
      * @param mixed $value Raw fragment decoded from the AniList response
      *
@@ -1119,6 +1174,27 @@ class AniListPlugin implements LifecycleInterface, ConfigurableInterface
         } catch (\Throwable) {
             // Timer not available outside Workerman process
             return null;
+        }
+    }
+
+    /**
+     * Arm one non-repeating Workerman timer (the enrichment drain tick).
+     *
+     * Protected seam, same posture as {@see addRepeatingTimer()}: the raw
+     * Workerman call is pinned here so the drain-chain lifecycle laws are
+     * testable through an override. Returns false when the arm failed —
+     * outside a Workerman process the class is absent and the Error is
+     * caught.
+     */
+    protected function addOneShotTimer(int $delaySeconds, callable $callback): bool
+    {
+        try {
+            \Workerman\Timer::add($delaySeconds, $callback, [], false);
+
+            return true;
+        } catch (\Throwable) {
+            // Timer not available outside Workerman process
+            return false;
         }
     }
 
