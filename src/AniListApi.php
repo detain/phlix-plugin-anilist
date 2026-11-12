@@ -81,15 +81,37 @@ class AniListApi
     private readonly LoggerInterface $logger;
 
     /**
+     * The bearer value is re-checked HERE, at the class that concatenates
+     * it into the Authorization header, against the same predicate
+     * {@see AniListSettings} enforces ({@see AniListSettings::isWellFormedToken()}
+     * — one pattern, no private copy). The production path only ever hands
+     * this constructor a settings-vetted token, but the client is a public
+     * class and a caller that builds it directly would otherwise ship a
+     * CR/LF- or space-bearing value verbatim into a header: a
+     * header-splitting primitive. A dirty token is refused loudly at
+     * construction, before any request is dispatched — never trimmed or
+     * silently dropped, since silently degrading to an unauthenticated
+     * client would mask the caller's bug.
+     *
      * @param HttpClientInterface $http HTTP client for API requests
-     * @param string $accessToken AniList API access token (optional for queries, required for mutations)
+     * @param string $accessToken AniList API access token (optional for queries, required for
+     *                            mutations); '' means unauthenticated
      * @param LoggerInterface|null $logger Optional PSR-3 logger
+     *
+     * @throws \InvalidArgumentException When a non-empty token is not a well-formed bearer value
      */
     public function __construct(
         private readonly HttpClientInterface $http,
         private readonly string $accessToken = '',
         ?LoggerInterface $logger = null,
     ) {
+        if ($accessToken !== '' && AniListSettings::isWellFormedToken($accessToken) === false) {
+            throw new \InvalidArgumentException(
+                'AniList access token must be printable ASCII with no whitespace or control characters'
+                . ' (a bearer value rides the Authorization header verbatim)'
+            );
+        }
+
         $this->logger = $logger ?? new NullLogger();
     }
 

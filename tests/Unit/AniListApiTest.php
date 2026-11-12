@@ -13,6 +13,7 @@ namespace Phlix\Tests\Unit\Plugins\Metadata\AniList;
 
 use Phlix\Plugins\Metadata\AniList\AniListApi;
 use Phlix\Plugins\Metadata\AniList\AniListApiException;
+use Phlix\Plugins\Metadata\AniList\AniListSettings;
 use Phlix\Plugins\Metadata\AniList\HttpClientInterface;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;
@@ -445,6 +446,75 @@ final class AniListApiTest extends TestCase
         $query = (string) ($http->lastData['query'] ?? '');
         $this->assertStringContainsString('mediaList(userName: $userName', $query);
         $this->assertStringContainsString('sort: [MEDIA_ID]', $query);
+    }
+
+    /**
+     * ANL-3: header-site bearer re-check. The client concatenates the token
+     * into the Authorization header verbatim, so a value that bypassed
+     * AniListSettings (direct construction) must be refused loudly before
+     * anything is dispatched — mutation test: drop the constructor guard
+     * and each of these reaches the header.
+     *
+     * @return array<string, array{string}>
+     */
+    public static function dirtyTokenProvider(): array
+    {
+        return [
+            'CRLF header split' => ["tok\r\nX-Injected: 1"],
+            'bare LF' => ["tok\nen"],
+            'interior space' => ['tok en'],
+            'leading space' => [' tok3n'],
+            'trailing newline (no silent trim)' => ["tok3n\n"],
+            'tab' => ["tok\ten"],
+            'ANSI escape' => ["\x1b[31mtok3n"],
+            'DEL' => ["tok\x7Fen"],
+            'non-ASCII' => ["tok\u{00E9}n"],
+            'bidi override' => ["tok\u{202E}en"],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('dirtyTokenProvider')]
+    public function testConstructorRefusesTokenThatWouldCorruptTheAuthorizationHeader(string $token): void
+    {
+        $http = new MockHttpClient([['data' => ['Page' => ['media' => []]]]]);
+
+        try {
+            new AniListApi($http, $token, new NullLogger());
+            $this->fail('A dirty bearer token must be refused at construction');
+        } catch (\InvalidArgumentException $e) {
+            $this->assertStringContainsString('printable ASCII', $e->getMessage());
+            // The refusal must not echo the secret back into the message.
+            $this->assertStringNotContainsString($token, $e->getMessage());
+        }
+
+        $this->assertSame('', $http->lastMethod, 'No request may be dispatched for a refused token');
+    }
+
+    public function testConstructorAcceptsTokenAtThePrintableAsciiBounds(): void
+    {
+        // \x21 ('!') and \x7E ('~') are the inclusive edges of the shared
+        // AniListSettings pattern; the header site must accept exactly what
+        // settings accepts, no narrower.
+        $token = "!" . 'eyJ0eXAiOiJKV1Qi.abc-_/+=' . "~";
+        $http = new MockHttpClient([['data' => ['Page' => ['media' => []]]]]);
+        $api = new AniListApi($http, $token, new NullLogger());
+
+        $api->searchAnime('Test');
+
+        $this->assertSame('Bearer ' . $token, $http->lastHeaders['Authorization'] ?? null);
+    }
+
+    public function testHeaderSiteAndSettingsShareOnePredicate(): void
+    {
+        // SSOT pin: the header site consults AniListSettings' predicate
+        // rather than carrying a private copy of the pattern.
+        $source = (string) file_get_contents(__DIR__ . '/../../src/AniListApi.php');
+
+        $this->assertStringContainsString('AniListSettings::isWellFormedToken(', $source);
+        $this->assertDoesNotMatchRegularExpression('/\\\\x21-\\\\x7E/', $source);
+        $this->assertFalse(AniListSettings::isWellFormedToken(''));
+        $this->assertFalse(AniListSettings::isWellFormedToken("a\r\nb"));
+        $this->assertTrue(AniListSettings::isWellFormedToken('abc.DEF-123'));
     }
 }
 

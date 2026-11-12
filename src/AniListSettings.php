@@ -31,8 +31,17 @@ final class AniListSettings
      * ANSI/bidi characters poison every later render of the value. AniList
      * tokens are opaque printable-ASCII strings; anything that fails this
      * pattern cannot be a real token and will never be stored or replayed.
+     *
+     * Anchored with `\z`, not `$`: PCRE's `$` also matches just before a
+     * final "\n", so a `$`-anchored pattern admitted "token\n" — a trailing
+     * LF straight into the header line.
+     *
+     * Single source of truth: every site that admits a bearer value — this
+     * class's constructor and parse boundary, and the header site in
+     * {@see AniListApi::__construct()} — tests it through
+     * {@see self::isWellFormedToken()}, never a private copy of the pattern.
      */
-    private const TOKEN_PATTERN = '/^[\x21-\x7E]+$/';
+    private const TOKEN_PATTERN = '/^[\x21-\x7E]+\z/';
 
     /**
      * @param string|null $accessToken AniList API access token (null when not authenticated)
@@ -54,7 +63,7 @@ final class AniListSettings
         // be unrepresentable. {@see fromArray()} sanitizes first — the
         // constructor is where API consumers that skip the parse boundary
         // get the refusal.
-        if ($accessToken !== null && $accessToken !== '' && preg_match(self::TOKEN_PATTERN, $accessToken) !== 1) {
+        if ($accessToken !== null && $accessToken !== '' && self::isWellFormedToken($accessToken) === false) {
             throw new \InvalidArgumentException(
                 'AniList access token must be printable ASCII with no whitespace or control characters'
                 . ' (a bearer value rides the Authorization header verbatim)'
@@ -136,11 +145,29 @@ final class AniListSettings
             return null;
         }
 
-        if (preg_match(self::TOKEN_PATTERN, $trimmed) !== 1) {
+        if (self::isWellFormedToken($trimmed) === false) {
             return null;
         }
 
         return $trimmed;
+    }
+
+    /**
+     * Whether a candidate bearer value satisfies {@see self::TOKEN_PATTERN}.
+     *
+     * The one predicate every bearer-admitting site consults (settings
+     * construction, the parse boundary, and the Authorization header site
+     * in {@see AniListApi}), so the accepted shape cannot drift between a
+     * stored token and the header it is replayed into. The empty string is
+     * NOT well-formed — callers that treat "" as "no token" check that first.
+     *
+     * @param string $token Candidate bearer value (untrimmed; no normalization is applied)
+     *
+     * @return bool True when the value is non-empty printable ASCII with no whitespace or control characters
+     */
+    public static function isWellFormedToken(string $token): bool
+    {
+        return preg_match(self::TOKEN_PATTERN, $token) === 1;
     }
 
     /**

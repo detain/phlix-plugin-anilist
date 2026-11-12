@@ -129,4 +129,24 @@ final class AniListSettingsTest extends TestCase
         $this->assertFalse($noToken->isConfigured());
         $this->assertFalse($noUsername->isConfigured());
     }
+
+    public function testConstructorRefusesTokenWithOnlyATrailingNewline(): void
+    {
+        // ANL-3: PCRE `$` matches before a final "\n"; the token pattern is
+        // `\z`-anchored so a lone trailing LF cannot ride into the header.
+        $this->assertFalse(AniListSettings::isWellFormedToken("token-123\n"));
+
+        $this->expectException(\InvalidArgumentException::class);
+
+        new AniListSettings(accessToken: "token-123\n");
+    }
+
+    public function testFromArrayStillTrimsATrailingNewlinePaste(): void
+    {
+        // The parse boundary trims before the (now stricter) check, so the
+        // common paste shape keeps round-tripping as a clean token.
+        $settings = AniListSettings::fromArray(['access_token' => "token-123\n"]);
+
+        $this->assertSame('token-123', $settings->accessToken());
+    }
 }
