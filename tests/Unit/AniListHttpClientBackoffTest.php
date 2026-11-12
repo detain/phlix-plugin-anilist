@@ -54,6 +54,33 @@ final class AniListHttpClientBackoffTest extends TestCase
         $this->assertSame(3, $client->sends);
     }
 
+    public function test_exhausted_429_carries_typed_status(): void
+    {
+        $client = new BackoffProbeHttpClient(array_fill(0, 4, ['status' => 429, 'body' => '', 'retry_after' => '1']));
+
+        try {
+            $client->post('https://graphql.anilist.co', ['query' => 'x']);
+            $this->fail('expected exhaustion');
+        } catch (AniListApiException $e) {
+            $this->assertSame(429, $e->httpStatus());
+        }
+    }
+
+    public function test_zero_retry_after_is_legit_and_negative_falls_to_ladder(): void
+    {
+        $client = new BackoffProbeHttpClient([
+            ['status' => 429, 'body' => '', 'retry_after' => '0'],
+            ['status' => 429, 'body' => '', 'retry_after' => '-5'],
+            ['status' => 429, 'body' => '', 'retry_after' => 'INF'],
+            ['status' => 200, 'body' => '{"data":{}}', 'retry_after' => null],
+        ]);
+
+        $client->post('https://graphql.anilist.co', ['query' => 'x']);
+
+        // 0 obeyed (no sleep recorded or 0.0), then ladder 4 (attempt 1), 8 (attempt 2)
+        $this->assertSame([4.0, 8.0], array_values(array_filter($client->sleeps, static fn ($s) => $s > 0.0)));
+    }
+
     public function test_persistent_429_throws_after_retries_are_exhausted(): void
     {
         $client = new BackoffProbeHttpClient([

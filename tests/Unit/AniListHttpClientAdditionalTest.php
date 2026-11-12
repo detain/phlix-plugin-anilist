@@ -79,9 +79,12 @@ final class AniListHttpClientAdditionalTest extends TestCase
         $result = $method->invoke($client, '10', 0);
         $this->assertSame(10.0, $result);
 
-        // Test with negative Retry-After (should be clamped to 0)
+        // Literal 0 is a legitimate immediate retry
+        $this->assertSame(0.0, $method->invoke($client, '0', 0));
+
+        // Negative Retry-After is malformed: falls through to the exponential ladder
         $result = $method->invoke($client, '-5', 0);
-        $this->assertSame(0.0, $result);
+        $this->assertSame(2.0, $result);
 
         // Test with null Retry-After (exponential backoff)
         $result = $method->invoke($client, null, 0);

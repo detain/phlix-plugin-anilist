@@ -169,7 +169,8 @@ class HttpClient implements HttpClientInterface
             if ($status === 429) {
                 if ($attempt >= self::MAX_RETRIES) {
                     throw new AniListApiException(
-                        'AniList API rate limit exceeded after ' . self::MAX_RETRIES . ' retries'
+                        'AniList API rate limit exceeded after ' . self::MAX_RETRIES . ' retries',
+                        429,
                     );
                 }
 
@@ -476,7 +477,8 @@ class HttpClient implements HttpClientInterface
      * server asked. Above the ceiling it is NOT — AniList's own limit windows are
      * short, so a multi-minute delay means a broken proxy or a hostile header,
      * and a cooperative worker must not park on it; such attempts fall back to
-     * the exponential ladder (M-ANILIST-09).
+     * the exponential ladder (M-ANILIST-09). A negative or non-finite value is
+     * malformed and takes the ladder too; a literal 0 is obeyed (retry now).
      *
      * @param string|null $retryAfter Raw Retry-After header value (delta-seconds)
      * @param int $attempt Zero-indexed retry attempt
@@ -486,8 +488,10 @@ class HttpClient implements HttpClientInterface
     private function retryAfterSeconds(?string $retryAfter, int $attempt): float
     {
         if ($retryAfter !== null && is_numeric($retryAfter) === true) {
-            $seconds = max(0.0, (float) $retryAfter);
-            if ($seconds <= self::MAX_BACKOFF_SEC) {
+            $seconds = (float) $retryAfter;
+            // A literal 0 is a legitimate "retry now"; a negative or non-finite
+            // value is a malformed header and falls through to the ladder.
+            if ($seconds >= 0.0 && is_finite($seconds) && $seconds <= self::MAX_BACKOFF_SEC) {
                 return $seconds;
             }
         }
