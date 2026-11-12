@@ -318,7 +318,7 @@ class AniListApi
      *
      * The three mutation methods used to return `$data[<field>] ?? []`
      * under a decorative `@var array<string, mixed>` — a shape promise over
-     * a mixed json_decode read that nothing checked, so a scalar or null
+     * a mixed json_decode read that nothing checked, so a non-null scalar
      * under the key escaped the declared array return as a TypeError at the
      * caller. Same posture as {@see self::readMedia()}: NARROW instead of
      * annotate. A missing or non-object fragment answers as the empty

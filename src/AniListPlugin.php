@@ -562,8 +562,8 @@ class AniListPlugin implements LifecycleInterface, ConfigurableInterface
      */
     private function buildMetadataFromEntry(array $entry): array
     {
-        $title = $entry['title'] ?? [];
-        $coverImage = $entry['coverImage'] ?? [];
+        $title = self::fragment($entry['title'] ?? null);
+        $coverImage = self::fragment($entry['coverImage'] ?? null);
 
         return [
             'anilist_id' => is_int($entry['id'] ?? null) ? $entry['id'] : null,
@@ -591,6 +591,26 @@ class AniListPlugin implements LifecycleInterface, ConfigurableInterface
             'end_date' => $this->parseFuzzyDate($entry['endDate'] ?? null, 'endDate'),
             'next_airing_episode' => $this->parseNextAiringEpisode($entry['nextAiringEpisode'] ?? null),
         ];
+    }
+
+    /**
+     * Narrow a nested remote object fragment (`title`, `coverImage`) to an
+     * array at the trust boundary.
+     *
+     * The entry's sub-objects arrive as mixed json_decode values; reading
+     * `['romaji']` / `['large']` straight off them was offset access on
+     * mixed (five baseline suppressions). Same posture as
+     * AniListApi::readMedia(): NARROW instead of annotate. A missing, null
+     * or non-object fragment answers as the empty array, so every member
+     * read below falls through to null exactly as an absent field did.
+     *
+     * @param mixed $value Raw fragment decoded from the AniList response
+     *
+     * @return array<array-key, mixed>
+     */
+    private static function fragment(mixed $value): array
+    {
+        return is_array($value) === true ? $value : [];
     }
 
     /**

@@ -5,10 +5,10 @@ parameters:
 		# the entire 12-family class.notFound block (unknown MediaItem /
 		# ItemRepository / Workerman\Timer / Workerman\Http\Client) is GONE —
 		# stub-backed uses now analyse against the real host signatures.
-		# What remains is the mixed remote-JSON shape (offsets on json_decode
-		# values), intentional defensive guards whose runtime payload is
-		# wider than the docblock claims, and one dead-stub return type —
-		# each entry attributable to concrete sites below.
+		# What remains is intentional defensive guards whose runtime payload
+		# is wider than the analysed stub surface claims, and one
+		# json_decode return-shape declaration — each entry attributable to
+		# concrete sites below.
 		#
 		# w14L8 (register PG-167/PG-168) retired five AniListApi.php entries
 		# from this baseline — the formatGraphQLErrors argument/is_array/
@@ -17,42 +17,12 @@ parameters:
 		# four Page-offset suppressions (the reads now go through the typed
 		# readPageList()/readMedia() boundary readers, so the offsets are no
 		# longer reached through mixed at all).
-		-
-			message: '#^Cannot access offset ''english'' on mixed\.$#'
-			identifier: offsetAccess.nonOffsetAccessible
-			count: 1
-			path: src/AniListPlugin.php
-
-		-
-			message: '#^Cannot access offset ''extraLarge'' on mixed\.$#'
-			identifier: offsetAccess.nonOffsetAccessible
-			count: 1
-			path: src/AniListPlugin.php
-
-		-
-			message: '#^Cannot access offset ''large'' on mixed\.$#'
-			identifier: offsetAccess.nonOffsetAccessible
-			count: 1
-			path: src/AniListPlugin.php
-
-		-
-			message: '#^Cannot access offset ''native'' on mixed\.$#'
-			identifier: offsetAccess.nonOffsetAccessible
-			count: 1
-			path: src/AniListPlugin.php
-
-		-
-			# Mixed-JSON boundary: title { romaji english native } and
-			# coverImage { large extraLarge } fragment reads in
-			# buildMetadataFromEntry — every read passes through
-			# optionalString()/scrubRemoteText() narrowing. (w06L5 retired the
-			# second 'romaji' site: the enrichment log now reads the scrubbed
-			# stored projection, not the raw entry fragment.)
-			message: '#^Cannot access offset ''romaji'' on mixed\.$#'
-			identifier: offsetAccess.nonOffsetAccessible
-			count: 1
-			path: src/AniListPlugin.php
-
+		#
+		# ANL-S8 (ANL-8) retired the last five AniListPlugin.php
+		# offset-on-mixed entries (title romaji/english/native, coverImage
+		# large/extraLarge in buildMetadataFromEntry): the two fragments now
+		# pass through the private fragment() boundary reader, so the member
+		# reads are on a narrowed array, not on mixed.
 		-
 			# The metadata lookup hook exists on host master (bfd4af98) but NOT
 			# in the released v1.2.x tags: the probe is deploy-matrix defense and
