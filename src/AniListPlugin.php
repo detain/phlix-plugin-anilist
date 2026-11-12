@@ -671,6 +671,23 @@ class AniListPlugin implements LifecycleInterface, ConfigurableInterface
     }
 
     /**
+     * Project the admin-supplied AniList username for one log line.
+     *
+     * {@see AniListSettings::fromArray()} already refuses a dirty username
+     * at the parse boundary; this is the log-site half for consumers that
+     * construct settings directly. Control/bidi families go through
+     * {@see self::scrubRemoteText()}, the tab/LF/CR that helper keeps for
+     * stored prose are dropped too (a line break in a log value forges a
+     * line), and the result is capped by {@see self::boundedForLog()}.
+     */
+    private static function usernameForLog(string $username): string
+    {
+        $scrubbed = str_replace(["\r", "\n", "\t"], '', self::scrubRemoteText($username) ?? '');
+
+        return self::boundedForLog($scrubbed);
+    }
+
+    /**
      * Render a remote answer (mutation result, decoded payload fragment) for
      * a log line as a bounded string.
      *
@@ -1143,8 +1160,10 @@ class AniListPlugin implements LifecycleInterface, ConfigurableInterface
             return;
         }
 
+        $logUsername = self::usernameForLog($username);
+
         $this->logger->info('AniList: starting watchlist sync', [
-            'username' => $username,
+            'username' => $logUsername,
         ]);
 
         $statuses = ['CURRENT', 'COMPLETED', 'PLANNING', 'PAUSED', 'DROPPED'];
@@ -1153,7 +1172,7 @@ class AniListPlugin implements LifecycleInterface, ConfigurableInterface
         }
 
         $this->logger->info('AniList: watchlist sync completed', [
-            'username' => $username,
+            'username' => $logUsername,
         ]);
     }
 
@@ -1183,7 +1202,7 @@ class AniListPlugin implements LifecycleInterface, ConfigurableInterface
                 $entries = $api->getUserAnimeList($username, $status, $page, self::SYNC_PAGE_SIZE);
             } catch (AniListApiException $e) {
                 $this->logger->warning('AniList: failed to sync status list', [
-                    'username' => $username,
+                    'username' => self::usernameForLog($username),
                     'status' => $status,
                     'page' => $page,
                     'error' => $e->getMessage(),
@@ -1213,7 +1232,7 @@ class AniListPlugin implements LifecycleInterface, ConfigurableInterface
         }
 
         $this->logger->warning('AniList: status list hit the pagination cap; remainder not synced', [
-            'username' => $username,
+            'username' => self::usernameForLog($username),
             'status' => $status,
             'pages' => self::MAX_SYNC_PAGES,
         ]);

@@ -44,6 +44,20 @@ final class AniListSettings
     private const TOKEN_PATTERN = '/^[\x21-\x7E]+\z/';
 
     /**
+     * Accepted shape for the admin-supplied AniList username: 1-64
+     * printable ASCII characters, no whitespace, no control characters.
+     *
+     * The username is projected into every sync log line and addresses the
+     * GraphQL list query, so an embedded CR/LF forges log lines, ANSI/bidi
+     * characters spoof every later render, and an unbounded value floods
+     * the log stream. AniList usernames are short alphanumeric handles;
+     * the 64-character ceiling is a generous flood bound, not the
+     * service's own limit. Anchored with `\z` for the same reason as
+     * {@see self::TOKEN_PATTERN}: `$` admits a trailing "\n".
+     */
+    private const USERNAME_PATTERN = '/^[\x21-\x7E]{1,64}\z/';
+
+    /**
      * @param string|null $accessToken AniList API access token (null when not authenticated)
      * @param string $username AniList username for watchlist sync
      * @param bool $syncEnabled Whether watchlist sync is enabled
@@ -95,8 +109,8 @@ final class AniListSettings
     /**
      * Create settings from an array (as loaded from DB settings JSON).
      *
-     * The token passes the parse-boundary guard below; every other field
-     * keeps its type-fallback law.
+     * The token and the username pass the parse-boundary guards below;
+     * every other field keeps its type-fallback law.
      *
      * @param array<string, mixed> $data Key-value array from settings_json
      *
@@ -106,7 +120,7 @@ final class AniListSettings
     {
         return new self(
             accessToken: self::parseToken($data['access_token'] ?? null),
-            username: is_string($data['username'] ?? null) === true ? $data['username'] : '',
+            username: self::parseUsername($data['username'] ?? null),
             syncEnabled: is_bool($data['sync_enabled'] ?? null) === true ? $data['sync_enabled'] : true,
             syncIntervalMinutes: is_int($data['sync_interval_minutes'] ?? null) === true
                 ? $data['sync_interval_minutes']
@@ -147,6 +161,36 @@ final class AniListSettings
 
         if (self::isWellFormedToken($trimmed) === false) {
             return null;
+        }
+
+        return $trimmed;
+    }
+
+    /**
+     * Parse-boundary guard for the admin-supplied username.
+     *
+     * Mirrors {@see self::parseToken()}: trim paste whitespace first, then
+     * refuse anything that is not short printable ASCII. A dirty value
+     * (embedded CR/LF, control or bidi character, interior space, flood) is
+     * NOT stored — it fails CLOSED to "" rather than throwing, for the same
+     * enable-time crash-loop reason as the token guard. An empty username
+     * leaves the plugin unconfigured ({@see self::isConfigured()}), so
+     * nothing dials AniList until the admin enters a clean handle.
+     *
+     * @param mixed $raw Raw `username` candidate
+     *
+     * @return string A username that satisfies {@see self::USERNAME_PATTERN}, or ""
+     */
+    private static function parseUsername(mixed $raw): string
+    {
+        if (is_string($raw) === false) {
+            return '';
+        }
+
+        $trimmed = trim($raw);
+
+        if (preg_match(self::USERNAME_PATTERN, $trimmed) !== 1) {
+            return '';
         }
 
         return $trimmed;

@@ -18,6 +18,8 @@ ever resolvable through the dev channel (default-branch HEAD pin, version
 
 ### Fixed
 - ANL-3 — AniListApi re-checks the bearer token at construction via shared AniListSettings::isWellFormedToken() (throws InvalidArgumentException on CR/LF/space/control/non-ASCII); TOKEN_PATTERN now \z-anchored so a trailing LF is refused at direct construction (fromArray() still trims) (f562d55).
+- ANL-4 — dispatch.yml passes github.ref/sha/repository to the gh api call via env: (REF/SHA/REPO, quoted) instead of inlining ${{ }} into the run script (f6b5404).
+- ANL-5 — the admin AniList username is guarded at the AniListSettings::fromArray() parse boundary (trim, then 1-64 printable ASCII via USERNAME_PATTERN, mirroring parseToken(); a dirty value fails closed to "" = unconfigured), and every sync log line carrying it (start/completed/status-list failure/pagination cap) projects it through usernameForLog() = scrubRemoteText() + CR/LF/TAB drop + boundedForLog(), so a direct-construction consumer cannot forge or flood a log line either.
 - Review-campaign batch W14-L8 (estate lane `w14L8`, register anchors
   `plugin-anilist__srphp.md` #6/#7/#16, `plugin-anilist__secaudit.md`
   #1/#4/#5/#7; items PG-165…PG-170):
