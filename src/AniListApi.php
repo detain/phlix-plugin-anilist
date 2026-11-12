@@ -22,7 +22,7 @@ use Psr\Log\NullLogger;
  * - Media-list status management (CURRENT/COMPLETED/PLANNING/PAUSED/DROPPED;
  *   the rarely-used REPEATING status is deliberately not synced)
  * - Episode progress tracking
- * - Average score and favorites
+ * - Average score and favourites
  *
  * @package Phlix\Plugins\Metadata\AniList
  */
@@ -751,7 +751,7 @@ class AniListApi
      *
      * @param int $mediaId AniList media ID
      *
-     * @return array<string, mixed> Updated favorite list entry
+     * @return array<string, mixed> Updated favourite list entry
      *
      * @throws AniListApiException
      */
