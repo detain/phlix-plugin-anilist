@@ -105,6 +105,11 @@ final class AniListHttpClientTlsTest extends TestCase
             protected function tick(): void
             {
             }
+
+            protected function coroutineRuntimeAvailable(): bool
+            {
+                return true;
+            }
         };
 
         $this->invokeSendOnce($client, 'https://graphql.anilist.co');
@@ -139,6 +144,11 @@ final class AniListHttpClientTlsTest extends TestCase
             protected function tick(): void
             {
                 // No-op: the fake resolves synchronously; never stall the suite.
+            }
+
+            protected function coroutineRuntimeAvailable(): bool
+            {
+                return true;
             }
         };
 
@@ -177,6 +187,11 @@ final class AniListHttpClientTlsTest extends TestCase
         $client = new class extends HttpClient {
             protected function tick(): void
             {
+            }
+
+            protected function coroutineRuntimeAvailable(): bool
+            {
+                return true;
             }
         };
 

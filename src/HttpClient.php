@@ -307,6 +307,15 @@ class HttpClient implements HttpClientInterface
      */
     protected function sendOnce(string $method, string $url, array $data, array $headers): array
     {
+        // The cooperative wait below only yields under a Swoole coroutine; on
+        // any other loop usleep() would block the whole worker for up to
+        // MAX_WAIT_SEC, so fail fast instead of stalling every other task.
+        if ($this->coroutineRuntimeAvailable() === false) {
+            throw new AniListApiException(
+                'AniList HTTP client requires a Swoole coroutine runtime; refusing to block the event loop'
+            );
+        }
+
         if (!class_exists(\Workerman\Http\Client::class)) {
             throw new AniListApiException('Workerman HTTP client is unavailable in this runtime');
         }
@@ -431,6 +440,37 @@ class HttpClient implements HttpClientInterface
             'SNI_enabled' => true,
             'peer_name' => is_string($host) && $host !== '' ? $host : 'graphql.anilist.co',
         ]];
+    }
+
+    /**
+     * Dependency-free probe: is the cooperative wait safe to run here?
+     *
+     * True only inside a live Swoole coroutine (cid > 0) on a worker whose
+     * event loop is Workerman's Swoole driver. Protected so tests can pin
+     * both outcomes without a Swoole runtime.
+     *
+     * @return bool
+     */
+    protected function coroutineRuntimeAvailable(): bool
+    {
+        if (!extension_loaded('swoole') || !class_exists('Swoole\\Coroutine')) {
+            return false;
+        }
+
+        /** @var callable(): mixed $getCid */
+        $getCid = ['Swoole\\Coroutine', 'getCid'];
+        $cid = $getCid();
+        if (!is_int($cid) || $cid <= 0) {
+            return false;
+        }
+
+        if (!class_exists('Workerman\\Worker')) {
+            return false;
+        }
+
+        $loop = get_class_vars('Workerman\\Worker')['eventLoopClass'] ?? null;
+
+        return is_string($loop) && $loop === 'Workerman\\Events\\Swoole';
     }
 
     /**
