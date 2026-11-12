@@ -86,6 +86,22 @@ class HttpClient implements HttpClientInterface
      */
     private const MAX_ERROR_BODY_SNIPPET = 500;
 
+    /**
+     * Ceiling (bytes) of a remote error body that the scrub in
+     * {@see self::safeErrorBodySnippet()} is allowed to scan (ANL-6).
+     *
+     * The excerpt was capped only AFTER the control-char regex, the
+     * whitespace collapse and mb_strlen() had each walked the WHOLE body —
+     * and the >= 400 throw in {@see request()} precedes the
+     * {@see self::MAX_RESPONSE_BYTES} check, so a hostile 4xx/5xx body of
+     * any size was scanned several times over (plus a full-size copy) just
+     * to keep its first 500 characters. The body is now cut to this many
+     * bytes first. Four bytes per character is the UTF-8 worst case, so a
+     * clean body still yields the full 500-character excerpt; the slack
+     * absorbs a little collapsed whitespace/control noise.
+     */
+    private const MAX_ERROR_BODY_SCAN_BYTES = self::MAX_ERROR_BODY_SNIPPET * 4 + 16;
+
     private readonly LoggerInterface $logger;
 
     /**
@@ -221,6 +237,12 @@ class HttpClient implements HttpClientInterface
      * GraphQL errors envelope carries the same remote-controlled prose and
      * gets exactly this scrub-and-cap per message.
      *
+     * Only the first {@see self::MAX_ERROR_BODY_SCAN_BYTES} bytes are ever
+     * scanned: the cut happens BEFORE the scrub (on a UTF-8 character
+     * boundary, so a clean multibyte body is not knocked into the ASCII
+     * fallback), and a cut body is `[truncated]` marked even when its
+     * scrubbed excerpt lands under the character cap.
+     *
      * @param string $body Raw remote response body or transport error text
      *
      * @return string Printable excerpt (≤ {@see self::MAX_ERROR_BODY_SNIPPET}
@@ -229,6 +251,14 @@ class HttpClient implements HttpClientInterface
      */
     public static function safeErrorBodySnippet(string $body): string
     {
+        $truncated = false;
+        if (strlen($body) > self::MAX_ERROR_BODY_SCAN_BYTES) {
+            // mb_strcut() backs off to the start of a split multibyte
+            // sequence, so the cut never manufactures invalid UTF-8.
+            $body = mb_strcut($body, 0, self::MAX_ERROR_BODY_SCAN_BYTES, 'UTF-8');
+            $truncated = true;
+        }
+
         // Newlines are the log-forgery vector, so they collapse to spaces
         // first; the remaining C0/C1, DEL, bidi and zero-width families are
         // display poison and are removed outright.
@@ -246,10 +276,15 @@ class HttpClient implements HttpClientInterface
 
         $flat = trim(preg_replace('/ {2,}/', ' ', $flat) ?? '');
         if (mb_strlen($flat) > self::MAX_ERROR_BODY_SNIPPET) {
-            $flat = mb_substr($flat, 0, self::MAX_ERROR_BODY_SNIPPET) . '[truncated]';
+            $flat = mb_substr($flat, 0, self::MAX_ERROR_BODY_SNIPPET);
+            $truncated = true;
         }
 
-        return $flat !== '' ? $flat : '(no printable body)';
+        if ($flat === '') {
+            return '(no printable body)';
+        }
+
+        return $truncated === true ? $flat . '[truncated]' : $flat;
     }
 
     /**
