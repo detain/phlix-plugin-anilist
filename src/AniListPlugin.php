@@ -44,8 +44,10 @@ use Psr\Log\NullLogger;
  * full five-status page walks (up to {@see self::MAX_SYNC_PAGES} pages per
  * status each), multiplying the request pressure on AniList's ~90 req/min
  * budget by the worker count. This plugin has no cross-process coordination
- * seam (a designated syncer would need host support); the multiplication is
- * documented honestly rather than discovered in a rate-limit incident.
+ * seam beyond the filesystem: each tick elects a single syncer per host by
+ * taking a non-blocking exclusive flock() on a per-user lockfile in the
+ * system temp dir; workers that lose the election skip the tick. The walk
+ * itself is paced ({@see self::SYNC_PAGE_PACING_SEC}) between page fetches.
  *
  * The periodic timer's lifecycle is explicit: one arm per enable cycle (the
  * id is kept and repeat arming is refused), and {@see onDisable()} removes
@@ -97,6 +99,12 @@ class AniListPlugin implements LifecycleInterface, ConfigurableInterface
      * answer, and hitting it is LOUD (never a silent truncation).
      */
     private const MAX_SYNC_PAGES = 100;
+
+    /**
+     * Pause between consecutive page fetches of the watchlist walk, in
+     * seconds (~85 req/min worst case, inside AniList's ~90 req/min budget).
+     */
+    private const SYNC_PAGE_PACING_SEC = 0.7;
 
     /**
      * Ceiling (characters) for one remote-derived value entering a log
@@ -1236,13 +1244,81 @@ class AniListPlugin implements LifecycleInterface, ConfigurableInterface
 
         $this->ensureApi();
 
+        $lock = $this->acquireSyncLock();
+        if ($lock === null) {
+            $this->logger->debug('AniList: another worker holds the sync election; skipping tick');
+
+            return;
+        }
+
         try {
             $this->syncWatchlistFromAniList();
         } catch (\Throwable $e) {
             $this->logger->warning('AniList: periodic sync failed', [
                 'error' => $e->getMessage(),
             ]);
+        } finally {
+            $this->releaseSyncLock($lock);
         }
+    }
+
+    /**
+     * Elect this worker as the single syncer for the tick.
+     *
+     * Non-blocking exclusive flock() on a per-username lockfile; the lock is
+     * per open file description, so it excludes the sibling forked workers.
+     * Returns the held handle, or null when another worker already holds it.
+     * If the lockfile cannot be opened at all the election fails OPEN (sync
+     * proceeds) so a read-only temp dir cannot disable syncing.
+     *
+     * @return resource|false|null handle, false = no lockfile available (proceed), null = lost
+     */
+    protected function acquireSyncLock()
+    {
+        $path = sys_get_temp_dir() . '/phlix-anilist-sync-' . hash('sha256', $this->settings->username) . '.lock';
+        $handle = @fopen($path, 'c');
+        if ($handle === false) {
+            return false;
+        }
+
+        if (!flock($handle, LOCK_EX | LOCK_NB)) {
+            fclose($handle);
+
+            return null;
+        }
+
+        return $handle;
+    }
+
+    /**
+     * Release the election lock taken by {@see acquireSyncLock()}.
+     *
+     * @param resource|false $handle
+     */
+    protected function releaseSyncLock($handle): void
+    {
+        if (is_resource($handle)) {
+            flock($handle, LOCK_UN);
+            fclose($handle);
+        }
+    }
+
+    /**
+     * Pause between page fetches of the watchlist walk.
+     *
+     * Protected seam so tests can observe pacing without waiting.
+     */
+    protected function pageSleep(float $seconds): void
+    {
+        try {
+            \Workerman\Timer::sleep($seconds);
+
+            return;
+        } catch (\Throwable) {
+            // no Workerman runtime (or no coroutine context): plain sleep
+        }
+
+        usleep((int) ($seconds * 1_000_000));
     }
 
     /**
@@ -1299,6 +1375,10 @@ class AniListPlugin implements LifecycleInterface, ConfigurableInterface
         }
 
         for ($page = 1; $page <= self::MAX_SYNC_PAGES; $page++) {
+            if ($page > 1) {
+                $this->pageSleep(self::SYNC_PAGE_PACING_SEC);
+            }
+
             try {
                 $entries = $api->getUserAnimeList($username, $status, $page, self::SYNC_PAGE_SIZE);
             } catch (AniListApiException $e) {
