@@ -11,11 +11,17 @@ jobs:
     runs-on: ubuntu-26.04
     steps:
       - name: Dispatch to phlix-plugins catalog
+        # ANL-4: github.* context values reach the shell only through env:,
+        # never as ${{ }} expressions inlined into the run script, so a ref
+        # name (branch/tag) can never be spliced into shell source.
         env:
           GH_TOKEN: ${{ secrets.PHLIX_BOT_TOKEN }}
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
         run: |
           gh api repos/detain/phlix-plugins/dispatches \
             --field event_type=plugin-push \
-            --field "client_payload[ref]=${{ github.ref }}" \
-            --field "client_payload[sha]=${{ github.sha }}" \
-            --field "client_payload[repo]=${{ github.repository }}"
+            --field "client_payload[ref]=$REF" \
+            --field "client_payload[sha]=$SHA" \
+            --field "client_payload[repo]=$REPO"

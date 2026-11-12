@@ -17,6 +17,7 @@ ever resolvable through the dev channel (default-branch HEAD pin, version
 ## [Unreleased] — 0.4.x development line
 
 ### Fixed
+- ANL-3 — AniListApi re-checks the bearer token at construction via shared AniListSettings::isWellFormedToken() (throws InvalidArgumentException on CR/LF/space/control/non-ASCII); TOKEN_PATTERN now \z-anchored so a trailing LF is refused at direct construction (fromArray() still trims) (f562d55).
 - Review-campaign batch W14-L8 (estate lane `w14L8`, register anchors
   `plugin-anilist__srphp.md` #6/#7/#16, `plugin-anilist__secaudit.md`
   #1/#4/#5/#7; items PG-165…PG-170):
