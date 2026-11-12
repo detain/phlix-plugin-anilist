@@ -313,6 +313,43 @@ class AniListApi
     }
 
     /**
+     * Read one mutation payload object (`SaveMediaListEntry`,
+     * `ToggleFavourite`) off a decoded envelope.
+     *
+     * The three mutation methods used to return `$data[<field>] ?? []`
+     * under a decorative `@var array<string, mixed>` — a shape promise over
+     * a mixed json_decode read that nothing checked, so a scalar or null
+     * under the key escaped the declared array return as a TypeError at the
+     * caller. Same posture as {@see self::readMedia()}: NARROW instead of
+     * annotate. A missing or non-object fragment answers as the empty
+     * payload (the pre-existing `?? []` absence semantics), and only
+     * string-keyed members survive, so the array<string, mixed> return is
+     * earned, not asserted (law source: phpstan.baseline.neon header —
+     * narrowing, not annotation).
+     *
+     * @param array<string, mixed> $data  Decoded `data` envelope
+     * @param string               $field The mutation root field
+     *
+     * @return array<string, mixed>
+     */
+    private static function readMutationPayload(array $data, string $field): array
+    {
+        $payload = $data[$field] ?? null;
+        if (is_array($payload) === false) {
+            return [];
+        }
+
+        $object = [];
+        foreach ($payload as $key => $value) {
+            if (is_string($key) === true) {
+                $object[$key] = $value;
+            }
+        }
+
+        return $object;
+    }
+
+    /**
      * Search for anime by title.
      *
      * Retained as public client API (host/plugin consumers); not internal
@@ -689,8 +726,7 @@ class AniListApi
 
         $data = $this->query($mutation, $variables);
 
-        /** @var array<string, mixed> */
-        return $data['SaveMediaListEntry'] ?? [];
+        return self::readMutationPayload($data, 'SaveMediaListEntry');
     }
 
     /**
@@ -718,8 +754,7 @@ class AniListApi
 
         $data = $this->query($mutation, ['mediaId' => $mediaId]);
 
-        /** @var array<string, mixed> */
-        return $data['ToggleFavourite'] ?? [];
+        return self::readMutationPayload($data, 'ToggleFavourite');
     }
 
     /**
@@ -766,7 +801,6 @@ class AniListApi
 
         $data = $this->query($mutation, $variables);
 
-        /** @var array<string, mixed> */
-        return $data['SaveMediaListEntry'] ?? [];
+        return self::readMutationPayload($data, 'SaveMediaListEntry');
     }
 }
