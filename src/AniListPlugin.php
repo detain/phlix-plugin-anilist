@@ -1340,6 +1340,22 @@ class AniListPlugin implements LifecycleInterface, ConfigurableInterface
     }
 
     /**
+     * Read the list owner's score format from a media-list entry.
+     *
+     * @param array<string, mixed> $entry Media list entry
+     *
+     * @return string|null e.g. POINT_100, POINT_10_DECIMAL; null when absent
+     */
+    private static function readScoreFormat(array $entry): ?string
+    {
+        $user = $entry['user'] ?? null;
+        $options = is_array($user) ? ($user['mediaListOptions'] ?? null) : null;
+        $format = is_array($options) ? ($options['scoreFormat'] ?? null) : null;
+
+        return is_string($format) && $format !== '' ? $format : null;
+    }
+
+    /**
      * Update watchlist status for a media item.
      *
      * @param int $malId MyAnimeList ID
@@ -1366,6 +1382,9 @@ class AniListPlugin implements LifecycleInterface, ConfigurableInterface
             'anilist_id' => $anilistId,
             'anilist_status' => $status,
             'anilist_score' => (is_int($rawScore) || is_float($rawScore)) === true ? $rawScore : null,
+            // Stored alongside (not normalized): the raw score is only meaningful
+            // with its scale (POINT_100 85 vs POINT_10_DECIMAL 8.5) — ANL-19.
+            'anilist_score_format' => self::readScoreFormat($entry),
             'anilist_progress' => is_int($entry['progress'] ?? null) ? $entry['progress'] : null,
             // The AniList favourite flag is deliberately absent: this path never
             // fetches it, and hardcoding it false wrote a lie into metadata_json

@@ -592,6 +592,7 @@ class AniListApi
                     id
                     status
                     score
+                    user { mediaListOptions { scoreFormat } }
                     progress
                     repeat
                     notes
@@ -661,6 +662,7 @@ class AniListApi
                     id
                     status
                     score
+                    user { mediaListOptions { scoreFormat } }
                     progress
                     progressVolumes
                     repeat

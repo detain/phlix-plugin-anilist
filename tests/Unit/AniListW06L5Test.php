@@ -342,6 +342,30 @@ final class AniListW06L5Test extends TestCase
         $this->assertSame(12, $written['anilist_progress']);
     }
 
+    public function test_watchlist_stores_score_format_alongside_score(): void
+    {
+        $repo = new ItemRepository();
+        $repo->rows['m1'] = [
+            'id' => 'm1',
+            'name' => 'Test',
+            'type' => 'episode',
+            'path' => '/x.mkv',
+            'metadata' => ['mal_id' => 12345],
+        ];
+        $plugin = $this->makePlugin(null, new NullLogger(), null, enabled: true);
+        $this->setProp($plugin, 'itemRepository', $repo);
+
+        $this->invoke($plugin, 'updateWatchlistStatus', 12345, 99, 'COMPLETED', [
+            'score' => 8.5,
+            'progress' => 12,
+            'user' => ['mediaListOptions' => ['scoreFormat' => 'POINT_10_DECIMAL']],
+        ]);
+
+        $written = $repo->updateCalls[0]['data']['metadata_json'];
+        $this->assertSame(8.5, $written['anilist_score']);
+        $this->assertSame('POINT_10_DECIMAL', $written['anilist_score_format']);
+    }
+
     // ------------------------------------------------------------------
     // Finding #5 (Minor) / secaudit #2: logs carry scrubbed, bounded,
     // remote-derived values only.
