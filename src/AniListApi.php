@@ -48,6 +48,13 @@ class AniListApi
      * fields a given entry type cannot answer (season on MANGA, chapters
      * on ANIME) come back null, which is what the duplicate copies already
      * produced for their mismatched halves and every consumer guards.
+     *
+     * The selection carries only what a consumer reads (ANL-15):
+     * `tags { name rank }` and `externalLinks { url site }` were requested
+     * on every media query but never read by
+     * {@see AniListPlugin::buildMetadataFromEntry()} — dead response
+     * weight and query complexity against the rate budget. A field joins
+     * this list in the same change that teaches a consumer to read it.
      */
     private const MEDIA_FIELDS = <<<'GRAPHQL'
         id
@@ -66,14 +73,12 @@ class AniListApi
         popularity
         favourites
         genres
-        tags { name rank }
         startDate { year month day }
         endDate { year month day }
         season
         seasonYear
         coverImage { large extraLarge }
         bannerImage
-        externalLinks { url site }
         relations { edges { relationType node { id title { romaji } type } } }
         nextAiringEpisode { episode airingAt }
         GRAPHQL;

@@ -507,6 +507,26 @@ final class AniListPluginLifecycleTest extends TestCase
         $this->assertTrue(true);
     }
 
+    public function testBuildMetadataFromEntryScrubsEnumBackedStringFields(): void
+    {
+        // ANL-15: format/status/season/genres are enum-backed upstream, but
+        // the plugin does not vouch for that contract at the trust boundary —
+        // they pass the same control/bidi scrub as titles.
+        $plugin = $this->makePlugin(new ItemRepository());
+
+        $result = $this->invoke($plugin, 'buildMetadataFromEntry', [
+            'format' => "TV\u{202E}",
+            'status' => "FINISHED\x00",
+            'season' => "\u{200F}WINTER",
+            'genres' => ["Action\u{2066}", 7, "Dra\x1Bma"],
+        ]);
+
+        $this->assertSame('TV', $result['format']);
+        $this->assertSame('FINISHED', $result['status']);
+        $this->assertSame('WINTER', $result['season']);
+        $this->assertSame(['Action', 'Drama'], $result['genres']);
+    }
+
     public function testBuildMetadataFromEntryHandlesAllFields(): void
     {
         $repo = new ItemRepository();

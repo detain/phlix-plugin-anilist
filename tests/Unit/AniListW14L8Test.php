@@ -203,6 +203,26 @@ final class AniListW14L8Test extends TestCase
         $this->assertStringContainsString('nextAiringEpisode { episode airingAt }', $query);
     }
 
+    public function test_media_selection_carries_no_unconsumed_fields(): void
+    {
+        // ANL-15: tags and externalLinks were selected on every media query
+        // but never read by buildMetadataFromEntry() — dead response weight
+        // and query complexity. They stay out until a consumer reads them.
+        $selection = (string) (new \ReflectionClass(AniListApi::class))->getConstant('MEDIA_FIELDS');
+
+        $this->assertStringNotContainsString('tags', $selection);
+        $this->assertStringNotContainsString('externalLinks', $selection);
+
+        $http = new MockHttpClient([['data' => []]]);
+        (new AniListApi($http, 't', new NullLogger()))->getMediaByMalId(1);
+        $query = (string) ($http->lastData['query'] ?? '');
+        $this->assertStringNotContainsString('tags {', $query);
+        $this->assertStringNotContainsString('externalLinks', $query);
+        // Control: the fields the metadata builder does read are still there.
+        $this->assertStringContainsString('genres', $query);
+        $this->assertStringContainsString('bannerImage', $query);
+    }
+
     // ------------------------------------------------------------------
     // PG-167: typed boundary readers replace decorative @var-over-offset.
     // ------------------------------------------------------------------

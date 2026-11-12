@@ -631,13 +631,13 @@ class AniListPlugin implements LifecycleInterface, ConfigurableInterface
             'popularity' => is_int($entry['popularity'] ?? null) ? $entry['popularity'] : null,
             'favourites' => is_int($entry['favourites'] ?? null) ? $entry['favourites'] : null,
             'genres' => self::stringListOrEmpty($entry['genres'] ?? null),
-            'format' => is_string($entry['format'] ?? null) ? $entry['format'] : null,
-            'status' => is_string($entry['status'] ?? null) ? $entry['status'] : null,
+            'format' => self::scrubRemoteText(self::optionalString($entry['format'] ?? null)),
+            'status' => self::scrubRemoteText(self::optionalString($entry['status'] ?? null)),
             'episodes' => is_int($entry['episodes'] ?? null) ? $entry['episodes'] : null,
             'duration' => is_int($entry['duration'] ?? null) ? $entry['duration'] : null,
             'chapters' => is_int($entry['chapters'] ?? null) ? $entry['chapters'] : null,
             'volumes' => is_int($entry['volumes'] ?? null) ? $entry['volumes'] : null,
-            'season' => is_string($entry['season'] ?? null) ? $entry['season'] : null,
+            'season' => self::scrubRemoteText(self::optionalString($entry['season'] ?? null)),
             'season_year' => is_int($entry['seasonYear'] ?? null) ? $entry['seasonYear'] : null,
             'cover_image_large' => self::httpsUrlOrNull(self::optionalString($coverImage['large'] ?? null)),
             'cover_image_extralarge' => self::httpsUrlOrNull(self::optionalString($coverImage['extraLarge'] ?? null)),
@@ -795,7 +795,10 @@ class AniListPlugin implements LifecycleInterface, ConfigurableInterface
      *
      * JSON gives no guarantees about list element types; non-strings are
      * dropped so a malformed payload cannot inject typed garbage into
-     * metadata_json.
+     * metadata_json. Each surviving element passes the same
+     * {@see self::scrubRemoteText()} control/bidi scrub as titles: genres
+     * are enum-backed upstream today, but the plugin does not vouch for
+     * that contract at the trust boundary (ANL-15).
      *
      * @param mixed $value Raw remote array-or-nothing value
      *
@@ -809,8 +812,9 @@ class AniListPlugin implements LifecycleInterface, ConfigurableInterface
 
         $list = [];
         foreach ($value as $item) {
-            if (is_string($item)) {
-                $list[] = $item;
+            $scrubbed = self::scrubRemoteText(self::optionalString($item));
+            if ($scrubbed !== null) {
+                $list[] = $scrubbed;
             }
         }
 
