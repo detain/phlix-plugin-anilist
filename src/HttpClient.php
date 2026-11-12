@@ -196,7 +196,8 @@ class HttpClient implements HttpClientInterface
                 // body is an API failure, never an absence (isNotFound stays
                 // false, so no lookup can memoize it as "no entry").
                 throw new AniListApiException(
-                    'AniList response body exceeded the ' . self::MAX_RESPONSE_BYTES . '-byte ceiling'
+                    'AniList response body exceeded the '
+                    . intdiv(self::MAX_RESPONSE_BYTES, 1024 * 1024) . ' MiB response ceiling'
                 );
             }
 

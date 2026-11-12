@@ -342,7 +342,7 @@ final class AniListMajorsW94Test extends TestCase
         $m->invoke($plugin); // must not throw
 
         $this->assertTrue(
-            $logger->hasRecord('warning', 'drain tick failed'),
+            $logger->hasRecord('warning', 'enrichment queue drain failed'),
             'the faulting item must be logged, not swallowed'
         );
 

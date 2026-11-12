@@ -172,7 +172,7 @@ final class AniListPluginOnEnableTest extends TestCase
 
         // Warning should be logged
         $this->assertTrue(
-            $logger->hasRecord('warning', 'wiring failed'),
+            $logger->hasRecord('warning', 'enable-time wiring failed'),
             'wiring failure should log a warning'
         );
     }

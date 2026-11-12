@@ -394,7 +394,7 @@ final class AniListW14L8Test extends TestCase
             $api->getMediaById(1);
             $this->fail('expected the ceiling to refuse a flood-capable success body');
         } catch (AniListApiException $e) {
-            $this->assertStringContainsString('ceiling', $e->getMessage());
+            $this->assertStringContainsString('8 MiB response ceiling', $e->getMessage());
             $this->assertFalse($e->isNotFound(), 'a refusal above the ceiling is an API failure, never absence');
         }
     }

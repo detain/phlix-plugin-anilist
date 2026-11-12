@@ -230,7 +230,7 @@ class AniListPlugin implements LifecycleInterface, ConfigurableInterface
             $this->itemRepository = $itemRepo instanceof ItemRepository ? $itemRepo : null;
         } catch (\Throwable $e) {
             // Never let a container miss take down worker boot.
-            $this->logger->warning('AniList: onEnable wiring failed', [
+            $this->logger->warning('AniList: enable-time wiring failed', [
                 'error' => $e->getMessage(),
             ]);
         }
@@ -415,7 +415,7 @@ class AniListPlugin implements LifecycleInterface, ConfigurableInterface
         try {
             $this->drainOne();
         } catch (\Throwable $e) {
-            $this->logger->warning('AniList: enrichment drain tick failed', [
+            $this->logger->warning('AniList: enrichment queue drain failed', [
                 'error' => $e->getMessage(),
                 'queue_size' => count($this->enrichQueue),
             ]);
@@ -585,7 +585,7 @@ class AniListPlugin implements LifecycleInterface, ConfigurableInterface
 
             return $entry;
         } catch (AniListApiException $e) {
-            $this->logger->warning('AniList: failed to look up entry by MAL ID', [
+            $this->logger->warning('AniList: failed to look up entry by MAL id', [
                 'mal_id' => $externalId,
                 'error' => $e->getMessage(),
             ]);
@@ -597,8 +597,9 @@ class AniListPlugin implements LifecycleInterface, ConfigurableInterface
     /**
      * Drop the per-drain-cycle mal_id lookup memo.
      *
-     * Called by the drain timer once the queue runs dry, so the next enrichment
-     * burst resolves fresh (M-ANILIST-15).
+     * Called by the drain timer once the queue runs dry, and when the chain is
+     * ended (onDisable() / an unconfigured tick), so the next enrichment burst
+     * resolves fresh (M-ANILIST-15).
      *
      * @return void
      */
@@ -1234,7 +1235,7 @@ class AniListPlugin implements LifecycleInterface, ConfigurableInterface
         try {
             $this->syncWatchlistFromAniList();
         } catch (\Throwable $e) {
-            $this->logger->warning('AniList periodic sync failed', [
+            $this->logger->warning('AniList: periodic sync failed', [
                 'error' => $e->getMessage(),
             ]);
         }
