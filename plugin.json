@@ -23,7 +23,7 @@
             "secret": true,
             "required": false,
             "tier": "standard",
-            "label": "Access Token",
+            "label": "Access token",
             "description": "Paste a personal AniList API access token here — Phlix does not run an AniList OAuth flow.",
             "link": "https://anilist.co/settings/developer",
             "link_text": "AniList developer settings"
@@ -33,7 +33,7 @@
             "default": "",
             "required": false,
             "tier": "standard",
-            "label": "AniList Username",
+            "label": "AniList username",
             "description": "Your AniList username. Every AniList feature requires this username AND the access token together: nothing runs (enrichment included) until both are set. It addresses the watch/read lists pulled during sync."
         },
         "sync_enabled": {
@@ -50,7 +50,7 @@
             "required": false,
             "tier": "advanced",
             "label": "Sync interval (minutes)",
-            "description": "How often to sync with AniList. Optional; default 60."
+            "description": "How often to sync with AniList. Optional; default 60. Applies per worker process: each worker arms its own timer, but a per-tick lock election lets only one worker per host actually sync."
         },
         "auto_match": {
             "type": "boolean",
