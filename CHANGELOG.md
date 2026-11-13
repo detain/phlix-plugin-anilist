@@ -16,6 +16,9 @@ ever resolvable through the dev channel (default-branch HEAD pin, version
 
 ## [Unreleased] — 0.4.x development line
 
+### Changed
+- Audit gate (MAL-17): `scripts/security-audit-check.php` messages no longer print the slash-stem plurals "advisory/ies" / "repository/ies"; they pluralise correctly (1 advisory, 2 advisories). Estate family wave; test mirrors updated in lockstep.
+
 ### Fixed
 - ANL-2 — single-syncer flock election per tick + 0.7s page-walk pacing (d4dcc45).
 - ANL-12/13/14/21 — public-copy accuracy (anime-only wording, per-worker election clause, favourites-count re-word, sentence-case labels) (c7a0160).
