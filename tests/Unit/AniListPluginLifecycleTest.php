@@ -822,6 +822,62 @@ final class AniListPluginLifecycleTest extends TestCase
         $this->assertNull($result);
     }
 
+    private function recordingLogger(): \Psr\Log\AbstractLogger
+    {
+        return new class extends \Psr\Log\AbstractLogger {
+            /** @var list<array{string, string}> */
+            public array $records = [];
+
+            public function log($level, string|\Stringable $message, array $context = []): void
+            {
+                $this->records[] = [(string) $level, (string) $message];
+            }
+        };
+    }
+
+    public function testLookupAniListEntryLogsRenamedWarningOnApiException(): void
+    {
+        $http = new class implements HttpClientInterface {
+            public function post(string $url, array $data, array $headers = []): array
+            {
+                return ['errors' => [['message' => 'Error']]];
+            }
+
+            public function get(string $url, array $params = [], array $headers = []): array
+            {
+                return [];
+            }
+        };
+        $plugin = $this->makePlugin(new ItemRepository(), new AniListApi($http, 'token', new NullLogger()));
+        $logger = $this->recordingLogger();
+        $this->setProp($plugin, 'logger', $logger);
+
+        $this->assertNull($this->invoke($plugin, 'lookupAniListEntry', 1));
+        $this->assertContains(['warning', 'AniList: failed to look up entry by MAL id'], $logger->records);
+    }
+
+    public function testRunScheduledSyncLogsRenamedWarningWhenSyncThrows(): void
+    {
+        $http = new class implements HttpClientInterface {
+            public function post(string $url, array $data, array $headers = []): array
+            {
+                throw new \RuntimeException('boom');
+            }
+
+            public function get(string $url, array $params = [], array $headers = []): array
+            {
+                throw new \RuntimeException('boom');
+            }
+        };
+        $plugin = $this->makePlugin(new ItemRepository(), new AniListApi($http, 'token', new NullLogger()));
+        $logger = $this->recordingLogger();
+        $this->setProp($plugin, 'logger', $logger);
+
+        $this->invoke($plugin, 'runScheduledSync');
+
+        $this->assertContains(['warning', 'AniList: periodic sync failed'], $logger->records);
+    }
+
     public function testEnsureApiDoesNothingWhenApiAlreadySet(): void
     {
         $repo = new ItemRepository();
