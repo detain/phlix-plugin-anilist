@@ -17,6 +17,7 @@ ever resolvable through the dev channel (default-branch HEAD pin, version
 ## [Unreleased] — 0.4.x development line
 
 ### Changed
+- Dependencies: dev toolchain upgraded to PHPUnit ^12.5 (was ^10.0; 343 tests pass unchanged) and PHPStan 2.3.5; `detain/phlix-shared` pin left at ^0.54.0 by design. GitHub Actions were already on current majors (checkout v6, SHA-pinned setup-php).
 - Audit gate (MAL-17): `scripts/security-audit-check.php` messages no longer print the slash-stem plurals "advisory/ies" / "repository/ies"; they pluralise correctly (1 advisory, 2 advisories). Estate family wave; test mirrors updated in lockstep.
 
 ### Fixed
